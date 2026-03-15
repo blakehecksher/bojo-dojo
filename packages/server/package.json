@@ -1,0 +1,17 @@
+{
+  "name": "@bojo-dojo/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "partykit dev"
+  },
+  "dependencies": {
+    "@bojo-dojo/common": "workspace:*",
+    "partykit": "^0.0.111",
+    "partysocket": "^1.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "bojo-dojo",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter client dev",
+    "build": "pnpm --filter client build",
+    "dev:server": "pnpm --filter server dev"
+  }
+}
