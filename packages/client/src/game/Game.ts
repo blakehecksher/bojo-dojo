@@ -23,6 +23,7 @@ import { RoundEndScreen } from '../screens/RoundEndScreen';
 import { MenuScreen } from '../screens/MenuScreen';
 import { LobbyScreen } from '../screens/LobbyScreen';
 import { AudioManager } from '../audio/AudioManager';
+import { LoadingScreen } from '../screens/LoadingScreen';
 import { GameConnection } from '../network/PartySocket';
 
 const DEG2RAD = Math.PI / 180;
@@ -46,6 +47,7 @@ export class Game {
   private menuScreen: MenuScreen;
   private lobbyScreen: LobbyScreen;
   private roundEndScreen: RoundEndScreen;
+  private loadingScreen: LoadingScreen;
 
   // Input
   private inputManager!: InputManager;
@@ -88,13 +90,27 @@ export class Game {
     this.menuScreen = new MenuScreen(this.hud.element);
     this.lobbyScreen = new LobbyScreen(this.hud.element);
     this.roundEndScreen = new RoundEndScreen(this.hud.element);
+    this.loadingScreen = new LoadingScreen(this.hud.element);
 
-    // Audio unlock on first interaction
-    const unlockAudio = () => {
+    // Audio unlock + fullscreen + orientation lock on first interaction
+    const unlockOnFirstTap = () => {
       this.audio.unlock();
-      document.removeEventListener('pointerdown', unlockAudio);
+      document.documentElement.requestFullscreen?.({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
+      (screen.orientation as { lock?: (o: string) => Promise<void> })?.lock?.('landscape').catch(() => {});
+      document.removeEventListener('pointerdown', unlockOnFirstTap);
     };
-    document.addEventListener('pointerdown', unlockAudio);
+    document.addEventListener('pointerdown', unlockOnFirstTap);
+
+    // Pause/resume when tab visibility changes
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        this.round.pause();
+        this.sceneManager.pause();
+      } else {
+        this.round.resume();
+        this.sceneManager.resume();
+      }
+    });
 
     this.setupInput();
     this.setupMenuHandlers();
@@ -104,11 +120,9 @@ export class Game {
     // Check URL for room code (join via shared link)
     const urlParams = new URLSearchParams(window.location.search);
     const roomFromUrl = urlParams.get('room');
+    this.showMenu();
     if (roomFromUrl) {
-      // Auto-join: show menu with prefilled code
-      this.showMenu();
-    } else {
-      this.showMenu();
+      this.menuScreen.setJoinCode(roomFromUrl);
     }
 
     this.sceneManager.start();
@@ -196,7 +210,7 @@ export class Game {
   }
 
   private setupNetworkHandlers() {
-    this.connection.onMessage((msg: ServerMessage) => {
+    this.connection.onMessage(async (msg: ServerMessage) => {
       switch (msg.type) {
         case 'ROOM_JOINED':
           this.localPlayerId = msg.playerId;
@@ -225,7 +239,7 @@ export class Game {
 
         case 'SPAWN_ASSIGNMENT':
           this.spawns = msg.spawns;
-          this.initGameWorld();
+          await this.initGameWorld();
           this.lobbyScreen.hide();
           this.phase = 'playing';
           break;
@@ -285,7 +299,10 @@ export class Game {
 
   // --- Game World ---
 
-  private initGameWorld() {
+  private async initGameWorld() {
+    this.loadingScreen.show();
+    await new Promise(r => setTimeout(r, 0)); // yield so loading screen renders
+
     this.clearWorld();
 
     this.heightmap = generateHeightmap(this.seed, TERRAIN_BASE);
@@ -320,6 +337,8 @@ export class Game {
       marker.setPosition(pos.x, pos.y, pos.z);
       this.playerMarkers.set(id, marker);
     }
+
+    this.loadingScreen.hide();
   }
 
   private clearWorld() {
@@ -512,10 +531,12 @@ export class Game {
   // --- Offline / Single-Player ---
 
   /** Start an offline single-player practice round. */
-  startOffline() {
+  async startOffline() {
     this.phase = 'offline';
     this.menuScreen.hide();
     this.lobbyScreen.hide();
+    this.loadingScreen.show();
+    await new Promise(r => setTimeout(r, 0)); // yield so loading screen renders
 
     this.seed = Math.floor(Math.random() * 2147483647);
     this.heightmap = generateHeightmap(this.seed, TERRAIN_BASE);
@@ -545,6 +566,7 @@ export class Game {
     marker.setPosition(spawnPts[1].x, spawnPts[1].y, spawnPts[1].z);
     this.playerMarkers.set('enemy', marker);
 
+    this.loadingScreen.hide();
     this.startOfflineRound();
   }
 

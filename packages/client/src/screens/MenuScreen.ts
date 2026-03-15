@@ -3,6 +3,7 @@
  */
 export class MenuScreen {
   private overlay: HTMLDivElement;
+  private codeInput!: HTMLInputElement;
   private onCreateGame?: (name: string) => void;
   private onJoinGame?: (code: string, name: string) => void;
 
@@ -64,7 +65,8 @@ export class MenuScreen {
     const joinRow = document.createElement('div');
     Object.assign(joinRow.style, { display: 'flex', gap: '8px', alignItems: 'center' });
 
-    const codeInput = document.createElement('input');
+    this.codeInput = document.createElement('input');
+    const codeInput = this.codeInput;
     codeInput.placeholder = 'Room code';
     codeInput.maxLength = 8;
     Object.assign(codeInput.style, {
@@ -113,6 +115,11 @@ export class MenuScreen {
   on(events: { onCreate?: (name: string) => void; onJoin?: (code: string, name: string) => void }) {
     this.onCreateGame = events.onCreate;
     this.onJoinGame = events.onJoin;
+  }
+
+  /** Pre-fill the join room code input. */
+  setJoinCode(code: string) {
+    this.codeInput.value = code.toUpperCase();
   }
 
   show() { this.overlay.style.display = 'flex'; }

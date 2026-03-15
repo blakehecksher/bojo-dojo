@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="32" fill="#1a1a2e"/>
+  <text x="96" y="108" font-family="system-ui,sans-serif" font-size="48" font-weight="bold" fill="#fff" text-anchor="middle" dominant-baseline="middle">BD</text>
+  <line x1="60" y1="130" x2="132" y2="130" stroke="#4a7c3f" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -52,6 +52,26 @@ export class Round {
     this.onEnd?.(reason);
   }
 
+  /** Pause the round timer (e.g. when tab is backgrounded). */
+  pause() {
+    if (this.state !== 'active' || this.intervalId === null) return;
+    clearInterval(this.intervalId);
+    this.intervalId = null;
+  }
+
+  /** Resume the round timer from where it left off. */
+  resume() {
+    if (this.state !== 'active' || this.intervalId !== null) return;
+    this.intervalId = window.setInterval(() => {
+      this.remaining = Math.max(0, this.remaining - 1);
+      this.onTick?.(this.remaining);
+
+      if (this.remaining <= 0) {
+        this.end('timeout');
+      }
+    }, 1000);
+  }
+
   dispose() {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);

@@ -79,6 +79,32 @@ export class SceneManager {
     });
   }
 
+  /** Pause the render loop (e.g. when tab is backgrounded). */
+  pause() {
+    this.renderer.setAnimationLoop(null);
+    this.clock.stop();
+  }
+
+  /** Resume the render loop. */
+  resume() {
+    this.clock.start();
+    this.accumulated = 0;
+    this.renderer.setAnimationLoop(() => {
+      const delta = this.clock.getDelta();
+      this.accumulated += delta;
+
+      if (this.accumulated >= FRAME_INTERVAL) {
+        const dt = this.accumulated;
+        this.accumulated = 0;
+
+        for (const cb of this.frameCallbacks) {
+          cb(dt);
+        }
+        this.renderer.render(this.scene, this.camera);
+      }
+    });
+  }
+
   dispose() {
     window.removeEventListener('resize', this.onResize);
     this.renderer.setAnimationLoop(null);

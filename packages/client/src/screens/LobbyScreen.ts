@@ -4,6 +4,7 @@
 export class LobbyScreen {
   private overlay: HTMLDivElement;
   private codeEl: HTMLDivElement;
+  private shareBtn: HTMLButtonElement;
   private playerListEl: HTMLDivElement;
   private startBtn: HTMLButtonElement;
   private onStart?: () => void;
@@ -44,6 +45,28 @@ export class LobbyScreen {
       navigator.clipboard?.writeText(this.codeEl.textContent || '');
     });
     this.overlay.appendChild(this.codeEl);
+
+    // Share link button
+    this.shareBtn = document.createElement('button');
+    this.shareBtn.textContent = 'Share Link';
+    Object.assign(this.shareBtn.style, {
+      padding: '8px 20px',
+      fontSize: '14px',
+      borderRadius: '6px',
+      border: '1px solid rgba(255,255,255,0.3)',
+      background: 'rgba(255,255,255,0.1)',
+      color: '#fff',
+      cursor: 'pointer',
+      marginBottom: '8px',
+    });
+    this.shareBtn.addEventListener('pointerdown', () => {
+      const code = this.codeEl.textContent || '';
+      const url = `${location.origin}${location.pathname}?room=${code}`;
+      navigator.clipboard?.writeText(url);
+      this.shareBtn.textContent = 'Copied!';
+      setTimeout(() => { this.shareBtn.textContent = 'Share Link'; }, 2000);
+    });
+    this.overlay.appendChild(this.shareBtn);
 
     // Player list
     const playersLabel = document.createElement('div');
