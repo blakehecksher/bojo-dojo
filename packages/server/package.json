@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@bojo-dojo/common": "workspace:*",
-    "partykit": "^0.0.111",
+    "partykit": "^0.0.115",
     "partysocket": "^1.0.3"
   },
   "devDependencies": {
