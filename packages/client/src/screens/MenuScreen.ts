@@ -6,6 +6,7 @@ export class MenuScreen {
   private codeInput!: HTMLInputElement;
   private onCreateGame?: (name: string) => void;
   private onJoinGame?: (code: string, name: string) => void;
+  private onOfflinePlay?: () => void;
 
   constructor(parent: HTMLElement) {
     this.overlay = document.createElement('div');
@@ -91,6 +92,19 @@ export class MenuScreen {
     joinRow.appendChild(joinBtn);
     this.overlay.appendChild(joinRow);
 
+    // Offline practice button
+    const offlineBtn = this.makeButton('Practice (Offline)');
+    Object.assign(offlineBtn.style, {
+      marginTop: '8px',
+      fontSize: '14px',
+      padding: '8px 20px',
+      opacity: '0.6',
+    });
+    offlineBtn.addEventListener('pointerdown', () => {
+      this.onOfflinePlay?.();
+    });
+    this.overlay.appendChild(offlineBtn);
+
     this.overlay.style.display = 'none';
     parent.appendChild(this.overlay);
   }
@@ -112,9 +126,10 @@ export class MenuScreen {
     return btn;
   }
 
-  on(events: { onCreate?: (name: string) => void; onJoin?: (code: string, name: string) => void }) {
+  on(events: { onCreate?: (name: string) => void; onJoin?: (code: string, name: string) => void; onOffline?: () => void }) {
     this.onCreateGame = events.onCreate;
     this.onJoinGame = events.onJoin;
+    this.onOfflinePlay = events.onOffline;
   }
 
   /** Pre-fill the join room code input. */

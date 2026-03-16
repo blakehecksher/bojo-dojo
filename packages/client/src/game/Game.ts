@@ -29,7 +29,7 @@ import { GameConnection } from '../network/PartySocket';
 const DEG2RAD = Math.PI / 180;
 
 // PartyKit host — configured via Vite env var, defaults to localhost
-const PARTYKIT_HOST = (import.meta as { env?: Record<string, string> }).env?.VITE_PARTYKIT_HOST || 'localhost:1999';
+const PARTYKIT_HOST = (import.meta as { env?: Record<string, string> }).env?.VITE_PARTYKIT_HOST || `${window.location.hostname}:1999`;
 
 export type GamePhase = 'menu' | 'lobby' | 'playing' | 'offline';
 
@@ -77,6 +77,9 @@ export class Game {
   private isHost = false;
   private lobbyPlayers: Array<{ id: string; displayName: string }> = [];
 
+  // HUD menu button (visible during gameplay)
+  private hudMenuBtn!: HTMLButtonElement;
+
   // Terrain objects to clean up between matches
   private terrainObjects: THREE.Object3D[] = [];
 
@@ -115,7 +118,9 @@ export class Game {
     this.setupInput();
     this.setupMenuHandlers();
     this.setupNetworkHandlers();
+    this.setupConnectionStateHandlers();
     this.setupFrameLoop();
+    this.setupHUDMenuButton();
 
     // Check URL for room code (join via shared link)
     const urlParams = new URLSearchParams(window.location.search);
@@ -187,12 +192,12 @@ export class Game {
   private setupMenuHandlers() {
     this.menuScreen.on({
       onCreate: (name) => {
-        // Generate a random room code
         const roomCode = this.generateRoomCode();
         this.connection.connect(PARTYKIT_HOST, roomCode, name);
         this.phase = 'lobby';
         this.menuScreen.hide();
         this.lobbyScreen.setRoomCode(roomCode);
+        this.lobbyScreen.setStatus('Connecting...');
         this.lobbyScreen.show();
       },
       onJoin: (code, name) => {
@@ -200,7 +205,11 @@ export class Game {
         this.phase = 'lobby';
         this.menuScreen.hide();
         this.lobbyScreen.setRoomCode(code);
+        this.lobbyScreen.setStatus('Connecting...');
         this.lobbyScreen.show();
+      },
+      onOffline: () => {
+        this.startOffline();
       },
     });
 
@@ -272,6 +281,45 @@ export class Game {
     });
   }
 
+  private setupConnectionStateHandlers() {
+    this.connection.onState({
+      onStateChange: (state, reason) => {
+        switch (state) {
+          case 'connecting':
+            this.lobbyScreen.setStatus('Connecting...');
+            break;
+
+          case 'connected':
+            this.lobbyScreen.setStatus('Connected', false);
+            // Clear the status after a moment
+            setTimeout(() => {
+              if (this.connection.state === 'connected') {
+                this.lobbyScreen.setStatus(null);
+              }
+            }, 1500);
+            break;
+
+          case 'error':
+            if (this.phase === 'lobby') {
+              this.lobbyScreen.setStatus(reason || 'Connection failed', true);
+            } else if (this.phase === 'playing') {
+              // Mid-game disconnect — return to menu
+              this.showMenu();
+            }
+            break;
+
+          case 'closed':
+            if (this.phase === 'lobby') {
+              this.lobbyScreen.setStatus(reason || 'Disconnected', true);
+            } else if (this.phase === 'playing') {
+              this.showMenu();
+            }
+            break;
+        }
+      },
+    });
+  }
+
   private setupFrameLoop() {
     this.sceneManager.onFrame((dt) => {
       // Thumbstick fine aim
@@ -339,6 +387,7 @@ export class Game {
     }
 
     this.loadingScreen.hide();
+    this.hudMenuBtn.style.display = 'block';
   }
 
   private clearWorld() {
@@ -357,6 +406,7 @@ export class Game {
   // --- Round Management ---
 
   private startNetworkRound() {
+    this.roundEndScreen.hide();
     this.roundActive = true;
     this.hud.arrowCounter.count = PACING.STARTING_ARROWS;
     this.bowModel.setDrawForce(0);
@@ -522,8 +572,6 @@ export class Game {
       .join('  |  ');
 
     this.roundEndScreen.show(title, scoreText, () => {
-      this.clearWorld();
-      this.phase = 'menu';
       this.showMenu();
     });
   }
@@ -567,6 +615,7 @@ export class Game {
     this.playerMarkers.set('enemy', marker);
 
     this.loadingScreen.hide();
+    this.hudMenuBtn.style.display = 'block';
     this.startOfflineRound();
   }
 
@@ -595,9 +644,52 @@ export class Game {
     this.hud.timer.start(PACING.BASE_ROUND_TIME);
   }
 
+  // --- HUD Menu Button ---
+
+  private setupHUDMenuButton() {
+    this.hudMenuBtn = document.createElement('button');
+    this.hudMenuBtn.textContent = '≡';
+    Object.assign(this.hudMenuBtn.style, {
+      position: 'absolute',
+      top: '12px',
+      right: '12px',
+      width: '44px',
+      height: '44px',
+      fontSize: '22px',
+      fontWeight: 'bold',
+      background: 'rgba(0,0,0,0.4)',
+      color: '#fff',
+      border: '1px solid rgba(255,255,255,0.3)',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      zIndex: '150',
+      display: 'none',
+      pointerEvents: 'auto',
+      touchAction: 'none',
+    });
+    this.hudMenuBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.showMenu();
+    });
+    this.hud.element.appendChild(this.hudMenuBtn);
+  }
+
   // --- Menu ---
 
-  private showMenu() {
+  showMenu() {
+    if (this.phase === 'offline' || this.phase === 'playing') {
+      if (this.roundActive) {
+        this.roundActive = false;
+        this.round.end('none');
+      }
+      this.roundEndScreen.hide();
+      this.clearWorld();
+      this.connection.disconnect();
+      this.lobbyPlayers = [];
+    }
+    this.phase = 'menu';
+    this.hudMenuBtn.style.display = 'none';
+    this.lobbyScreen.hide();
     this.menuScreen.show();
   }
 

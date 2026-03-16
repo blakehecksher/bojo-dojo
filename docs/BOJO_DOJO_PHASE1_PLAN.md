@@ -8,7 +8,19 @@ Phase 1 ("Playable Core") gets two players into a room, onto the same generated 
 
 ---
 
-## Project Structure
+## Project Structureon (used by client preview + server validation)
+          hit-detection.ts  # Trajectory-vs-cylinder intersection
+        terrain/
+          noise.ts          # Seeded Simplex wrapper (deterministic PRNG)
+          heightmap.ts      # Heightmap generation from seed + params
+          spawn.ts          # Farthest-point sampling, slope filter, LOS validation
+
+    client/                 # Three.js renderer, input, HUD, networking client
+      index.html            # Entry point with landscape viewport meta
+      vite.config.ts
+      public/audio/         # Placeholder sound files
+      src/
+        main.ts             # Init renderer, game loop,
 
 pnpm monorepo with 3 packages:
 
@@ -24,19 +36,7 @@ bojo-dojo/
         types.ts            # Message types (discriminated unions), Vec3, game state types
         constants.ts        # All tuning params from spec (physics, terrain, pacing)
         physics/
-          trajectory.ts     # Ballistic arc computation (used by client preview + server validation)
-          hit-detection.ts  # Trajectory-vs-cylinder intersection
-        terrain/
-          noise.ts          # Seeded Simplex wrapper (deterministic PRNG)
-          heightmap.ts      # Heightmap generation from seed + params
-          spawn.ts          # Farthest-point sampling, slope filter, LOS validation
-
-    client/                 # Three.js renderer, input, HUD, networking client
-      index.html            # Entry point with landscape viewport meta
-      vite.config.ts
-      public/audio/         # Placeholder sound files
-      src/
-        main.ts             # Init renderer, game loop, wire everything
+          trajectory.ts     # Ballistic arc computati wire everything
         game/
           Game.ts           # State machine: MENU -> LOBBY -> PLAYING -> ROUND_END
           Round.ts          # Single round lifecycle (timer, arrow count, win condition)

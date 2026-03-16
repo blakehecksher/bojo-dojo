@@ -1,5 +1,11 @@
 import type { ServerMessage, ClientMessage } from '@bojo-dojo/common';
 
+export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
+
+export interface ConnectionCallbacks {
+  onStateChange?: (state: ConnectionState, reason?: string) => void;
+}
+
 /**
  * PartyKit WebSocket connection wrapper.
  * Uses raw WebSocket (partysocket package can be added later for auto-reconnect).
@@ -8,11 +14,24 @@ import type { ServerMessage, ClientMessage } from '@bojo-dojo/common';
 export class GameConnection {
   private ws: WebSocket | null = null;
   private handlers: Array<(msg: ServerMessage) => void> = [];
-  private _connected = false;
+  private _state: ConnectionState = 'idle';
   private _playerId: string | null = null;
+  private stateCallbacks: ConnectionCallbacks = {};
+  private connectTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  get connected() { return this._connected; }
+  get state() { return this._state; }
+  get connected() { return this._state === 'connected'; }
   get playerId() { return this._playerId; }
+
+  /** Register callbacks for connection state changes. */
+  onState(callbacks: ConnectionCallbacks) {
+    this.stateCallbacks = callbacks;
+  }
+
+  private setState(state: ConnectionState, reason?: string) {
+    this._state = state;
+    this.stateCallbacks.onStateChange?.(state, reason);
+  }
 
   /**
    * Connect to a PartyKit room.
@@ -21,13 +40,27 @@ export class GameConnection {
    * @param displayName Player's display name
    */
   connect(host: string, roomId: string, displayName: string) {
+    // Clean up any existing connection
+    this.disconnect();
+
     const protocol = host.startsWith('localhost') ? 'ws' : 'wss';
     const url = `${protocol}://${host}/party/${roomId}?name=${encodeURIComponent(displayName)}`;
+
+    this.setState('connecting');
+
+    // Timeout if connection doesn't open within 8 seconds
+    this.connectTimeout = setTimeout(() => {
+      if (this._state === 'connecting') {
+        this.ws?.close();
+        this.setState('error', 'Connection timed out');
+      }
+    }, 8000);
 
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
-      this._connected = true;
+      if (this.connectTimeout) { clearTimeout(this.connectTimeout); this.connectTimeout = null; }
+      this.setState('connected');
     };
 
     this.ws.onmessage = (event) => {
@@ -48,11 +81,17 @@ export class GameConnection {
     };
 
     this.ws.onclose = () => {
-      this._connected = false;
+      if (this.connectTimeout) { clearTimeout(this.connectTimeout); this.connectTimeout = null; }
+      // Only fire 'closed' if we were previously connected (not if we errored)
+      if (this._state === 'connected') {
+        this.setState('closed', 'Connection lost');
+      } else if (this._state === 'connecting') {
+        this.setState('error', 'Could not connect to server');
+      }
     };
 
-    this.ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
+    this.ws.onerror = () => {
+      // onerror always fires before onclose, so let onclose handle state transition
     };
   }
 
@@ -70,8 +109,11 @@ export class GameConnection {
 
   /** Disconnect. */
   disconnect() {
+    if (this.connectTimeout) { clearTimeout(this.connectTimeout); this.connectTimeout = null; }
     this.ws?.close();
     this.ws = null;
-    this._connected = false;
+    if (this._state !== 'idle') {
+      this.setState('idle');
+    }
   }
 }

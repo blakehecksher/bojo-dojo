@@ -35,7 +35,7 @@ test.describe('Smoke', () => {
     // Give the game a moment to initialise (Three.js scene setup)
     await page.waitForFunction(() => !!(window as any).__game, { timeout: 10_000 });
     const phase = await page.evaluate(() => (window as any).__game.phase);
-    expect(phase).toBe('offline');
+    expect(phase).toBe('menu');
   });
 
   test('no uncaught JS errors on load', async ({ page }) => {

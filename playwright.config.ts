@@ -12,12 +12,22 @@ export default defineConfig({
       args: ['--use-gl=egl', '--disable-web-security'],
     },
   },
-  webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: true, // reuse if already running (common during dev)
-    timeout: 30_000,
-  },
+  webServer: [
+    {
+      command: 'pnpm dev',
+      url: 'http://localhost:5173',
+      reuseExistingServer: true,
+      timeout: 30_000,
+      // Override .env so Vite connects to local PartyKit for tests
+      env: { VITE_PARTYKIT_HOST: 'localhost:1999' },
+    },
+    {
+      command: 'pnpm dev:server',
+      port: 1999,
+      reuseExistingServer: true,
+      timeout: 30_000,
+    },
+  ],
   projects: [
     {
       name: 'chromium',

@@ -32,6 +32,9 @@ export class SceneManager {
       500
     );
 
+    // Add camera to scene so its children (e.g. bow model) render
+    this.scene.add(this.camera);
+
     // Lighting
     const ambient = new THREE.AmbientLight(0xb0c4de, 0.6);
     this.scene.add(ambient);

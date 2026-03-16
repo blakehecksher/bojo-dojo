@@ -47,6 +47,9 @@ export function generateSpawnPoints(
     return fallbackSpawns(heightmap, playerCount);
   }
 
+  // DEBUG: spawn players 5m apart for testing visibility
+  const DEBUG_CLOSE_SPAWN = false;
+
   // Farthest-point sampling
   const selected: Vec3[] = [];
 
@@ -54,6 +57,18 @@ export function generateSpawnPoints(
   const first = candidates[Math.floor(rng() * Math.min(20, candidates.length))];
   selected.push(first);
 
+  if (DEBUG_CLOSE_SPAWN) {
+    // Place all other players 5m from the first and return immediately
+    // (skip LOS validation which would move them far away)
+    for (let p = 1; p < playerCount; p++) {
+      const angle = (p / (playerCount - 1)) * Math.PI * 2 * rng();
+      const nx = first.x + Math.cos(angle) * 5;
+      const nz = first.z + Math.sin(angle) * 5;
+      const ny = sampleHeight(heightmap, nx, nz);
+      selected.push({ x: nx, y: ny, z: nz });
+    }
+    return selected;
+  } else {
   for (let p = 1; p < playerCount; p++) {
     let bestIdx = -1;
     let bestMinDist = -1;
@@ -77,6 +92,7 @@ export function generateSpawnPoints(
     if (bestIdx >= 0) {
       selected.push(candidates[bestIdx]);
     }
+  }
   }
 
   // LOS validation: ensure no two spawns have direct line of sight

@@ -7,6 +7,7 @@ export class LobbyScreen {
   private shareBtn: HTMLButtonElement;
   private playerListEl: HTMLDivElement;
   private startBtn: HTMLButtonElement;
+  private statusEl: HTMLDivElement;
   private onStart?: () => void;
 
   constructor(parent: HTMLElement) {
@@ -24,6 +25,16 @@ export class LobbyScreen {
       zIndex: '200',
       pointerEvents: 'auto',
     });
+
+    // Connection status indicator
+    this.statusEl = document.createElement('div');
+    Object.assign(this.statusEl.style, {
+      fontSize: '14px',
+      color: 'rgba(255,255,255,0.5)',
+      marginBottom: '12px',
+      display: 'none',
+    });
+    this.overlay.appendChild(this.statusEl);
 
     // Room code
     const codeLabel = document.createElement('div');
@@ -132,6 +143,16 @@ export class LobbyScreen {
     this.startBtn.style.display = isHost ? 'block' : 'none';
     const waiting = this.overlay.querySelector('#lobby-waiting') as HTMLElement;
     if (waiting) waiting.style.display = isHost ? 'none' : 'block';
+  }
+
+  setStatus(text: string | null, isError = false) {
+    if (text) {
+      this.statusEl.textContent = text;
+      this.statusEl.style.display = 'block';
+      this.statusEl.style.color = isError ? '#e74c3c' : 'rgba(255,255,255,0.5)';
+    } else {
+      this.statusEl.style.display = 'none';
+    }
   }
 
   onStartMatch(cb: () => void) { this.onStart = cb; }
