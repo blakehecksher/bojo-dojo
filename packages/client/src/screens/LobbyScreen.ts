@@ -91,16 +91,25 @@ export class LobbyScreen {
       this.shareBtn.style.background = 'rgba(255,255,255,0.08)';
       this.shareBtn.style.transform = 'scale(1)';
     });
-    this.shareBtn.addEventListener('pointerdown', () => {
+    this.shareBtn.addEventListener('pointerdown', async () => {
       const code = this.codeEl.textContent || '';
       const url = `${location.origin}${location.pathname}?room=${code}`;
-      navigator.clipboard?.writeText(url);
-      this.shareBtn.textContent = 'Copied!';
-      this.shareBtn.style.background = 'rgba(46, 204, 113, 0.3)';
-      setTimeout(() => {
-        this.shareBtn.textContent = 'Share Link';
-        this.shareBtn.style.background = 'rgba(255,255,255,0.08)';
-      }, 2000);
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'Bojo Dojo', text: `Join my game!`, url });
+        } catch {
+          // User cancelled share — that's fine
+        }
+      } else {
+        navigator.clipboard?.writeText(url);
+        this.shareBtn.textContent = 'Copied!';
+        this.shareBtn.style.background = 'rgba(46, 204, 113, 0.3)';
+        setTimeout(() => {
+          this.shareBtn.textContent = 'Share Link';
+          this.shareBtn.style.background = 'rgba(255,255,255,0.08)';
+        }, 2000);
+      }
     });
     this.overlay.appendChild(this.shareBtn);
 

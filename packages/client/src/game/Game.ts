@@ -137,8 +137,22 @@ export class Game {
     this.setupFrameLoop();
     this.setupViewSync();
     const roomFromUrl = new URLSearchParams(window.location.search).get('room');
-    this.showMenu();
-    if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
+    const savedSession = sessionStorage.getItem('bojo-session');
+
+    if (savedSession) {
+      // Auto-rejoin after page reload (e.g. returning from share sheet)
+      try {
+        const session = JSON.parse(savedSession) as { roomCode: string; name: string; colorIndex: number };
+        this.joinRoom(session.roomCode, session.name, session.colorIndex);
+      } catch {
+        this.showMenu();
+        if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
+      }
+    } else {
+      this.showMenu();
+      if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
+    }
+
     this.sceneManager.start();
   }
 
@@ -230,24 +244,23 @@ export class Game {
     });
   }
 
+  private joinRoom(roomCode: string, name: string, colorIndex: number) {
+    sessionStorage.setItem('bojo-session', JSON.stringify({ roomCode, name, colorIndex }));
+    this.connection.connect(PARTYKIT_HOST, roomCode, name, colorIndex);
+    this.phase = 'lobby';
+    this.menuScreen.hide();
+    this.lobbyScreen.setRoomCode(roomCode);
+    this.lobbyScreen.setStatus('Connecting...');
+    this.lobbyScreen.show();
+  }
+
   private setupMenuHandlers() {
     this.menuScreen.on({
       onCreate: (name, colorIndex) => {
-        const roomCode = this.generateRoomCode();
-        this.connection.connect(PARTYKIT_HOST, roomCode, name, colorIndex);
-        this.phase = 'lobby';
-        this.menuScreen.hide();
-        this.lobbyScreen.setRoomCode(roomCode);
-        this.lobbyScreen.setStatus('Connecting...');
-        this.lobbyScreen.show();
+        this.joinRoom(this.generateRoomCode(), name, colorIndex);
       },
       onJoin: (code, name, colorIndex) => {
-        this.connection.connect(PARTYKIT_HOST, code, name, colorIndex);
-        this.phase = 'lobby';
-        this.menuScreen.hide();
-        this.lobbyScreen.setRoomCode(code);
-        this.lobbyScreen.setStatus('Connecting...');
-        this.lobbyScreen.show();
+        this.joinRoom(code, name, colorIndex);
       },
       onOffline: () => {
         this.startOffline();
@@ -373,16 +386,38 @@ export class Game {
             this.lobbyScreen.setStatus('Connected', false);
             break;
           case 'error':
-            if (this.phase === 'lobby') this.lobbyScreen.setStatus(reason || 'Connection failed', true);
-            else if (this.phase === 'playing') this.showMenu();
-            break;
           case 'closed':
-            if (this.phase === 'lobby') this.lobbyScreen.setStatus(reason || 'Disconnected', true);
-            else if (this.phase === 'playing') this.showMenu();
+            if (this.phase === 'lobby' || this.phase === 'playing') {
+              this.tryAutoReconnect(reason);
+            }
             break;
         }
       },
     });
+  }
+
+  private tryAutoReconnect(reason?: string) {
+    const raw = sessionStorage.getItem('bojo-session');
+    if (!raw) {
+      if (this.phase === 'lobby') this.lobbyScreen.setStatus(reason || 'Disconnected', true);
+      else this.showMenu();
+      return;
+    }
+    try {
+      const session = JSON.parse(raw) as { roomCode: string; name: string; colorIndex: number };
+      this.lobbyScreen.setStatus('Reconnecting...', false);
+      this.lobbyScreen.setRoomCode(session.roomCode);
+      if (this.phase !== 'lobby') {
+        this.menuScreen.hide();
+        this.lobbyScreen.show();
+      }
+      this.phase = 'lobby';
+      setTimeout(() => {
+        this.connection.connect(PARTYKIT_HOST, session.roomCode, session.name, session.colorIndex);
+      }, 1000);
+    } catch {
+      this.showMenu();
+    }
   }
 
   private setupFrameLoop() {
@@ -967,6 +1002,7 @@ export class Game {
   }
 
   showMenu() {
+    sessionStorage.removeItem('bojo-session');
     this.stopMatchStateRetry();
     this.roundActive = false;
     this.matchState = null;
