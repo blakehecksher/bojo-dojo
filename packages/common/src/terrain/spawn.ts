@@ -3,122 +3,42 @@ import { SPAWN } from '../constants.js';
 import { sampleHeight, getSlopeAt } from './heightmap.js';
 import { mulberry32 } from './noise.js';
 
-/**
- * Generate spawn points for N players on the given heightmap.
- * Uses farthest-point sampling with slope filtering and LOS validation.
- */
-export function generateSpawnPoints(
-  seed: number,
-  heightmap: HeightmapData,
-  playerCount: number,
-): Vec3[] {
-  const rng = mulberry32(seed + 12345);
-  const { worldWidth, worldDepth, width, depth } = heightmap;
-  const halfW = worldWidth / 2;
-  const halfD = worldDepth / 2;
-  const buffer = SPAWN.EDGE_BUFFER;
-  const cellSize = worldWidth / (width - 1);
-
-  // Generate candidate grid positions
-  const candidates: Vec3[] = [];
-  const step = 10; // sample every 10 meters
-  for (let wx = -halfW + buffer; wx <= halfW - buffer; wx += step) {
-    for (let wz = -halfD + buffer; wz <= halfD - buffer; wz += step) {
-      // Convert to grid coords for slope check
-      const gx = ((wx + halfW) / worldWidth) * (width - 1);
-      const gz = ((wz + halfD) / worldDepth) * (depth - 1);
-      const slope = getSlopeAt(heightmap, gx, gz);
-
-      if (slope <= SPAWN.MAX_SLOPE) {
-        const h = sampleHeight(heightmap, wx, wz);
-        candidates.push({ x: wx, y: h, z: wz });
-      }
-    }
-  }
-
-  // Shuffle candidates for randomness
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-  }
-
-  if (candidates.length < playerCount) {
-    // Fallback: just spread evenly
-    return fallbackSpawns(heightmap, playerCount);
-  }
-
-  // DEBUG: spawn players 5m apart for testing visibility
-  const DEBUG_CLOSE_SPAWN = false;
-
-  // Farthest-point sampling
-  const selected: Vec3[] = [];
-
-  // Pick first spawn near-ish center but not exactly center
-  const first = candidates[Math.floor(rng() * Math.min(20, candidates.length))];
-  selected.push(first);
-
-  if (DEBUG_CLOSE_SPAWN) {
-    // Place all other players 5m from the first and return immediately
-    // (skip LOS validation which would move them far away)
-    for (let p = 1; p < playerCount; p++) {
-      const angle = (p / (playerCount - 1)) * Math.PI * 2 * rng();
-      const nx = first.x + Math.cos(angle) * 5;
-      const nz = first.z + Math.sin(angle) * 5;
-      const ny = sampleHeight(heightmap, nx, nz);
-      selected.push({ x: nx, y: ny, z: nz });
-    }
-    return selected;
-  } else {
-  for (let p = 1; p < playerCount; p++) {
-    let bestIdx = -1;
-    let bestMinDist = -1;
-
-    for (let i = 0; i < candidates.length; i++) {
-      const c = candidates[i];
-
-      // Skip if too close to any already-selected
-      let minDist = Infinity;
-      for (const s of selected) {
-        const d = dist2D(c, s);
-        if (d < minDist) minDist = d;
-      }
-
-      if (minDist > bestMinDist) {
-        bestMinDist = minDist;
-        bestIdx = i;
-      }
-    }
-
-    if (bestIdx >= 0) {
-      selected.push(candidates[bestIdx]);
-    }
-  }
-  }
-
-  // LOS validation: ensure no two spawns have direct line of sight
-  // If LOS exists, try swapping with nearby candidates (best-effort)
-  for (let i = 0; i < selected.length; i++) {
-    for (let j = i + 1; j < selected.length; j++) {
-      if (hasLineOfSight(heightmap, selected[i], selected[j])) {
-        // Try to replace j with a candidate that doesn't have LOS to any selected
-        const replacement = findNonLOSCandidate(
-          heightmap, candidates, selected, j
-        );
-        if (replacement) {
-          selected[j] = replacement;
-        }
-        // If no replacement found, accept it (best-effort per spec)
-      }
-    }
-  }
-
-  return selected;
+function dist2D(a: { x: number; z: number }, b: { x: number; z: number }): number {
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dz * dz);
 }
 
-/**
- * Check if two points have direct line of sight across the heightmap.
- * Steps along the line and checks if terrain blocks the view.
- */
+function hasOpenNearbyGround(heightmap: HeightmapData, x: number, z: number): boolean {
+  const sampleRadius = SPAWN.OPENNESS_SAMPLE_RADIUS;
+  const baseHeight = sampleHeight(heightmap, x, z);
+  const offsets = [
+    [sampleRadius, 0],
+    [-sampleRadius, 0],
+    [0, sampleRadius],
+    [0, -sampleRadius],
+    [sampleRadius * 0.7, sampleRadius * 0.7],
+    [-sampleRadius * 0.7, sampleRadius * 0.7],
+    [sampleRadius * 0.7, -sampleRadius * 0.7],
+    [-sampleRadius * 0.7, -sampleRadius * 0.7],
+  ];
+
+  let maxRelief = 0;
+  for (const [dx, dz] of offsets) {
+    maxRelief = Math.max(maxRelief, Math.abs(sampleHeight(heightmap, x + dx, z + dz) - baseHeight));
+  }
+
+  return maxRelief <= SPAWN.OPENNESS_MAX_RELIEF;
+}
+
+function getMinimumSpawnDistance(heightmap: HeightmapData, playerCount: number): number {
+  const extras = Math.max(0, playerCount - 2);
+  return Math.min(
+    heightmap.worldWidth * 0.55,
+    SPAWN.MIN_DISTANCE_2P + extras * SPAWN.MIN_DISTANCE_PER_EXTRA_PLAYER,
+  );
+}
+
 function hasLineOfSight(heightmap: HeightmapData, a: Vec3, b: Vec3): boolean {
   const eyeHeight = SPAWN.PLAYER_EYE_HEIGHT;
   const steps = 50;
@@ -127,16 +47,11 @@ function hasLineOfSight(heightmap: HeightmapData, a: Vec3, b: Vec3): boolean {
     const x = a.x + (b.x - a.x) * t;
     const z = a.z + (b.z - a.z) * t;
     const terrainH = sampleHeight(heightmap, x, z);
-
-    // Line-of-sight height at this point
     const losH = (a.y + eyeHeight) + ((b.y + eyeHeight) - (a.y + eyeHeight)) * t;
-
-    if (terrainH > losH) {
-      return false; // Terrain blocks view
-    }
+    if (terrainH > losH) return false;
   }
 
-  return true; // Unobstructed
+  return true;
 }
 
 function findNonLOSCandidate(
@@ -144,31 +59,18 @@ function findNonLOSCandidate(
   candidates: Vec3[],
   selected: Vec3[],
   replaceIndex: number,
+  minDistance: number,
 ): Vec3 | null {
-  const minDist = SPAWN.MIN_DISTANCE_2P * 0.5; // relaxed minimum for replacement
-
-  for (const c of candidates) {
-    // Must be far enough from other selected points
-    let tooClose = false;
-    for (let i = 0; i < selected.length; i++) {
-      if (i === replaceIndex) continue;
-      if (dist2D(c, selected[i]) < minDist) {
-        tooClose = true;
-        break;
-      }
-    }
+  for (const candidate of candidates) {
+    const tooClose = selected.some((spawn, index) => (
+      index !== replaceIndex && dist2D(candidate, spawn) < minDistance
+    ));
     if (tooClose) continue;
 
-    // Must not have LOS to any other selected point
-    let hasLOS = false;
-    for (let i = 0; i < selected.length; i++) {
-      if (i === replaceIndex) continue;
-      if (hasLineOfSight(heightmap, c, selected[i])) {
-        hasLOS = true;
-        break;
-      }
-    }
-    if (!hasLOS) return c;
+    const hasLOS = selected.some((spawn, index) => (
+      index !== replaceIndex && hasLineOfSight(heightmap, candidate, spawn)
+    ));
+    if (!hasLOS) return candidate;
   }
 
   return null;
@@ -187,8 +89,85 @@ function fallbackSpawns(heightmap: HeightmapData, count: number): Vec3[] {
   return spawns;
 }
 
-function dist2D(a: Vec3, b: Vec3): number {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  return Math.sqrt(dx * dx + dz * dz);
+/**
+ * Generate spawn points for N players on the given heightmap.
+ * Uses farthest-point sampling with slope, edge, openness, and LOS checks.
+ */
+export function generateSpawnPoints(
+  seed: number,
+  heightmap: HeightmapData,
+  playerCount: number,
+): Vec3[] {
+  const rng = mulberry32(seed + 12345);
+  const { worldWidth, worldDepth, width, depth } = heightmap;
+  const halfW = worldWidth / 2;
+  const halfD = worldDepth / 2;
+  const minDistance = getMinimumSpawnDistance(heightmap, playerCount);
+
+  const candidates: Vec3[] = [];
+  const step = 8;
+
+  for (let wx = -halfW + SPAWN.EDGE_BUFFER; wx <= halfW - SPAWN.EDGE_BUFFER; wx += step) {
+    for (let wz = -halfD + SPAWN.EDGE_BUFFER; wz <= halfD - SPAWN.EDGE_BUFFER; wz += step) {
+      const gx = ((wx + halfW) / worldWidth) * (width - 1);
+      const gz = ((wz + halfD) / worldDepth) * (depth - 1);
+      const slope = getSlopeAt(heightmap, gx, gz);
+      if (slope > SPAWN.MAX_SLOPE) continue;
+      if (!hasOpenNearbyGround(heightmap, wx, wz)) continue;
+      candidates.push({ x: wx, y: sampleHeight(heightmap, wx, wz), z: wz });
+    }
+  }
+
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  if (candidates.length < playerCount) {
+    return fallbackSpawns(heightmap, playerCount);
+  }
+
+  const selected: Vec3[] = [];
+  const centerBias = [...candidates].sort((a, b) => dist2D(a, { x: 0, z: 0 }) - dist2D(b, { x: 0, z: 0 }));
+  selected.push(centerBias[Math.floor(rng() * Math.min(16, centerBias.length))]);
+
+  for (let playerIndex = 1; playerIndex < playerCount; playerIndex++) {
+    let bestIdx = -1;
+    let bestMinDist = -1;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      let candidateMinDist = Infinity;
+
+      for (const spawn of selected) {
+        candidateMinDist = Math.min(candidateMinDist, dist2D(candidate, spawn));
+      }
+
+      if (candidateMinDist < minDistance) continue;
+      if (candidateMinDist > bestMinDist) {
+        bestMinDist = candidateMinDist;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx >= 0) {
+      selected.push(candidates[bestIdx]);
+    }
+  }
+
+  if (selected.length < playerCount) {
+    return fallbackSpawns(heightmap, playerCount);
+  }
+
+  for (let i = 0; i < selected.length; i++) {
+    for (let j = i + 1; j < selected.length; j++) {
+      if (!hasLineOfSight(heightmap, selected[i], selected[j])) continue;
+      const replacement = findNonLOSCandidate(heightmap, candidates, selected, j, minDistance * 0.8);
+      if (replacement) {
+        selected[j] = replacement;
+      }
+    }
+  }
+
+  return selected;
 }

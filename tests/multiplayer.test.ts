@@ -54,6 +54,8 @@ test.describe.serial('Multiplayer', () => {
     joinContext = await browser.newContext();
     hostPage = await hostContext.newPage();
     joinPage = await joinContext.newPage();
+    hostPage.on('pageerror', (err) => { throw new Error(`Host page error: ${err.message}`); });
+    joinPage.on('pageerror', (err) => { throw new Error(`Join page error: ${err.message}`); });
   });
 
   test.afterAll(async () => {
@@ -132,7 +134,20 @@ test.describe.serial('Multiplayer', () => {
       { timeout: 15_000 },
     );
 
-    // Both should have a heightmap
+    await hostPage.waitForFunction(
+      () => !!(window as any).__game.heightmap || !!(window as any).__lastMatchStateError,
+      { timeout: 15_000 },
+    );
+    await joinPage.waitForFunction(
+      () => !!(window as any).__game.heightmap || !!(window as any).__lastMatchStateError,
+      { timeout: 15_000 },
+    );
+
+    const hostError = await hostPage.evaluate(() => (window as any).__lastMatchStateError);
+    const joinError = await joinPage.evaluate(() => (window as any).__lastMatchStateError);
+    expect(hostError).toBeFalsy();
+    expect(joinError).toBeFalsy();
+
     const hostHasMap = await hostPage.evaluate(() => !!(window as any).__game.heightmap);
     const joinHasMap = await joinPage.evaluate(() => !!(window as any).__game.heightmap);
     expect(hostHasMap).toBe(true);

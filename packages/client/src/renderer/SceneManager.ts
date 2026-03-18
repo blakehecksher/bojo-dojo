@@ -1,28 +1,28 @@
 import * as THREE from 'three';
 
-const TARGET_FPS = 30;
-const FRAME_INTERVAL = 1 / TARGET_FPS;
-
 export class SceneManager {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
 
   private clock = new THREE.Clock();
-  private accumulated = 0;
   private frameCallbacks: Array<(dt: number) => void> = [];
 
   constructor() {
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: false });
+    // Renderer — 60 fps with antialiasing for smooth visuals
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = false;
-    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
     document.body.prepend(this.renderer.domElement);
 
-    // Scene
+    // Scene — sky-blue background so missing terrain is obvious (not just black)
     this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x87ceeb);
 
     // Camera — 70 degree FOV for first-person mobile
     this.camera = new THREE.PerspectiveCamera(
@@ -36,11 +36,24 @@ export class SceneManager {
     this.scene.add(this.camera);
 
     // Lighting
-    const ambient = new THREE.AmbientLight(0xb0c4de, 0.6);
+    const ambient = new THREE.AmbientLight(0xb0c4de, 0.75);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
+    const hemi = new THREE.HemisphereLight(0xdceeff, 0x556041, 0.9);
+    this.scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xfff5e0, 1.1);
     sun.position.set(50, 80, 30);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 1024;
+    sun.shadow.mapSize.height = 1024;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -100;
+    sun.shadow.camera.right = 100;
+    sun.shadow.camera.top = 100;
+    sun.shadow.camera.bottom = -100;
+    sun.shadow.bias = -0.002;
     this.scene.add(sun);
 
     // Fog for draw distance limiting (good for mobile perf)
@@ -58,27 +71,18 @@ export class SceneManager {
     this.renderer.setSize(w, h);
   };
 
-  /** Register a callback to run each frame (at 30fps). */
+  /** Register a callback to run each frame. */
   onFrame(cb: (dt: number) => void) {
     this.frameCallbacks.push(cb);
   }
 
-  /** Start the 30fps render loop. */
+  /** Start the render loop (native refresh rate). */
   start() {
     this.clock.start();
     this.renderer.setAnimationLoop(() => {
-      const delta = this.clock.getDelta();
-      this.accumulated += delta;
-
-      if (this.accumulated >= FRAME_INTERVAL) {
-        const dt = this.accumulated;
-        this.accumulated = 0;
-
-        for (const cb of this.frameCallbacks) {
-          cb(dt);
-        }
-        this.renderer.render(this.scene, this.camera);
-      }
+      const dt = Math.min(this.clock.getDelta(), 0.05); // cap at 50ms to avoid spiral
+      for (const cb of this.frameCallbacks) cb(dt);
+      this.renderer.render(this.scene, this.camera);
     });
   }
 
@@ -91,20 +95,10 @@ export class SceneManager {
   /** Resume the render loop. */
   resume() {
     this.clock.start();
-    this.accumulated = 0;
     this.renderer.setAnimationLoop(() => {
-      const delta = this.clock.getDelta();
-      this.accumulated += delta;
-
-      if (this.accumulated >= FRAME_INTERVAL) {
-        const dt = this.accumulated;
-        this.accumulated = 0;
-
-        for (const cb of this.frameCallbacks) {
-          cb(dt);
-        }
-        this.renderer.render(this.scene, this.camera);
-      }
+      const dt = Math.min(this.clock.getDelta(), 0.05);
+      for (const cb of this.frameCallbacks) cb(dt);
+      this.renderer.render(this.scene, this.camera);
     });
   }
 

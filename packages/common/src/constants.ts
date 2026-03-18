@@ -2,50 +2,75 @@ import type { TerrainParams } from './types.js';
 
 // --- Arrow Physics ---
 export const PHYSICS = {
-  MIN_ARROW_SPEED: 20,    // m/s — gentle lob ~15m
-  MAX_ARROW_SPEED: 80,    // m/s — full draw ~120m
+  MIN_ARROW_SPEED: 20,    // m/s — gentle lob
+  MAX_ARROW_SPEED: 80,    // m/s — full draw
   GRAVITY: 9.8,           // m/s^2
   ARROW_HITBOX_RADIUS: 0.3,
-  PLAYER_HITBOX_RADIUS: 0.5,
+  PLAYER_HITBOX_RADIUS: 0.6,
   PLAYER_HITBOX_HEIGHT: 1.8,
-  TRAJECTORY_PREVIEW_FRACTION: 0.3,
-  TRAJECTORY_DT: 1 / 60,  // simulation timestep
+  PICKUP_HITBOX_RADIUS: 1.1,
+  PICKUP_HITBOX_HEIGHT: 1.4,
+  TRAJECTORY_PREVIEW_FRACTION: 0.4,
+  TRAJECTORY_DT: 1 / 60,
 } as const;
 
 // --- Input & Controls ---
 export const INPUT = {
-  SWIPE_SENSITIVITY: 0.3,       // degrees per pixel
-  THUMBSTICK_MAX_SPEED: 15,     // degrees per second
-  THUMBSTICK_DEAD_ZONE: 0.15,   // fraction of stick radius
-  PULL_SLIDER_RANGE: 200,       // px drag for full draw
-  PULL_SLIDER_CANCEL_ZONE: 0.2, // bottom 20% = cancel
+  SWIPE_SENSITIVITY: 0.3,
+  THUMBSTICK_MAX_SPEED: 15,
+  THUMBSTICK_DEAD_ZONE: 0.15,
+  PULL_SLIDER_RANGE: 200,
+  PULL_SLIDER_CANCEL_ZONE: 0.2,
 } as const;
 
 // --- Terrain ---
 export const TERRAIN_BASE: TerrainParams = {
-  mapSize: 200,             // 200m x 200m for 2 players
-  resolution: 100,          // 100x100 vertex grid (1 vertex per 2m)
-  maxElevation: 30,         // 30m delta
+  mapSize: 150,
+  resolution: 100,
+  maxElevation: 30,
   noiseOctaves: 4,
   primaryFrequency: 0.01,
-  treeDensity: 0.01,        // ~1 per 100m^2
-  rockDensity: 0.005,       // ~1 per 200m^2
+  treeDensity: 0.004,
+  rockDensity: 0.003,
+} as const;
+
+export const TERRAIN_SCALING = {
+  SIZE_PER_EXTRA_PLAYER: 25,
+  MAX_BETA_PLAYERS: 4,
 } as const;
 
 // --- Spawn & Placement ---
 export const SPAWN = {
-  MIN_DISTANCE_2P: 80,      // meters
-  MAX_SLOPE: 15,            // degrees
-  EDGE_BUFFER: 20,          // meters from map border
-  PLAYER_EYE_HEIGHT: 1.6,   // meters above terrain
+  MIN_DISTANCE_2P: 80,
+  MIN_DISTANCE_PER_EXTRA_PLAYER: 10,
+  MAX_SLOPE: 15,
+  EDGE_BUFFER: 20,
+  PLAYER_EYE_HEIGHT: 1.6,
+  CLEAR_RADIUS: 8,
+  OPENNESS_SAMPLE_RADIUS: 10,
+  OPENNESS_MAX_RELIEF: 5,
+  MAX_GENERATION_RETRIES: 8,
+} as const;
+
+export const PICKUPS = {
+  BASE_ARROW_BUNDLE_COUNT: 2,
+  BASE_SHIELD_COUNT: 1,
+  BASE_TELEPORT_COUNT: 1,
+  MIN_DISTANCE_FROM_SPAWN: 18,
+  MIN_DISTANCE_BETWEEN_PICKUPS: 16,
+  ARROW_BUNDLE_GAIN: 3,
 } as const;
 
 // --- Round Pacing ---
 export const PACING = {
-  BASE_ROUND_TIME: 90,         // seconds
-  TIME_PER_EXTRA_PLAYER: 15,   // seconds
-  ZONE_ACTIVATION: 0.6,        // fraction of round time
-  STARTING_ARROWS: 5,
-  TELEPORT_ARROWS_PER_ROUND: 1,
+  BASE_ROUND_TIME: 150,
+  TIME_PER_EXTRA_PLAYER: 15,
+  ZONE_ACTIVATION: 0.7,       // elapsed fraction
+  ZONE_FINAL_RADIUS_FRACTION: 0.45,
+  ZONE_OUTSIDE_GRACE: 15,
+  STARTING_ARROWS: 7,
+  TELEPORT_ARROWS_PER_ROUND: 7,
   ROUNDS_TO_WIN: 3,
+  FLETCH_DURATION_SECONDS: 2,
+  FLETCH_ARROWS_GAINED: 1,
 } as const;

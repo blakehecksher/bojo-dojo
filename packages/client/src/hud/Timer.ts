@@ -2,6 +2,7 @@ import { PACING } from '@bojo-dojo/common';
 
 /**
  * Round timer display — top-center.
+ * Pulses red when time is low.
  */
 export class Timer {
   private el: HTMLDivElement;
@@ -21,7 +22,20 @@ export class Timer {
       fontWeight: 'bold',
       textShadow: '1px 1px 3px rgba(0,0,0,0.8)',
       pointerEvents: 'none',
+      transition: 'color 0.3s, text-shadow 0.3s',
     });
+
+    // Inject pulse keyframe if not present
+    if (!document.getElementById('timer-pulse-style')) {
+      const style = document.createElement('style');
+      style.id = 'timer-pulse-style';
+      style.textContent = `@keyframes timer-pulse {
+        0%, 100% { transform: translateX(-50%) scale(1); }
+        50% { transform: translateX(-50%) scale(1.12); }
+      }`;
+      document.head.appendChild(style);
+    }
+
     this.render();
     parent.appendChild(this.el);
   }
@@ -55,11 +69,18 @@ export class Timer {
     const s = this.remaining % 60;
     this.el.textContent = `${m}:${String(s).padStart(2, '0')}`;
 
-    // Flash red when low
-    if (this.remaining <= 15) {
+    if (this.remaining <= 10) {
       this.el.style.color = '#ff4444';
+      this.el.style.textShadow = '0 0 8px rgba(255, 68, 68, 0.5), 1px 1px 3px rgba(0,0,0,0.8)';
+      this.el.style.animation = 'timer-pulse 0.6s ease-in-out infinite';
+    } else if (this.remaining <= 15) {
+      this.el.style.color = '#ff4444';
+      this.el.style.textShadow = '1px 1px 3px rgba(0,0,0,0.8)';
+      this.el.style.animation = 'none';
     } else {
       this.el.style.color = '#ffffff';
+      this.el.style.textShadow = '1px 1px 3px rgba(0,0,0,0.8)';
+      this.el.style.animation = 'none';
     }
   }
 

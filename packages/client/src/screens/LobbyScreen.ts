@@ -1,5 +1,6 @@
 /**
  * Lobby screen — shows room code, connected players, and start button.
+ * Polished with transitions, hover states, and pulsing status.
  */
 export class LobbyScreen {
   private overlay: HTMLDivElement;
@@ -8,6 +9,8 @@ export class LobbyScreen {
   private playerListEl: HTMLDivElement;
   private startBtn: HTMLButtonElement;
   private statusEl: HTMLDivElement;
+  private waitingEl: HTMLDivElement;
+  private hideTimeoutId: number | null = null;
   private onStart?: () => void;
 
   constructor(parent: HTMLElement) {
@@ -24,6 +27,8 @@ export class LobbyScreen {
       background: 'rgba(0, 0, 0, 0.85)',
       zIndex: '200',
       pointerEvents: 'auto',
+      opacity: '0',
+      transition: 'opacity 0.3s ease-out',
     });
 
     // Connection status indicator
@@ -33,27 +38,34 @@ export class LobbyScreen {
       color: 'rgba(255,255,255,0.5)',
       marginBottom: '12px',
       display: 'none',
+      transition: 'color 0.2s, opacity 0.2s',
     });
     this.overlay.appendChild(this.statusEl);
 
-    // Room code
+    // Room code label
     const codeLabel = document.createElement('div');
     codeLabel.textContent = 'Room Code:';
-    Object.assign(codeLabel.style, { fontSize: '14px', color: 'rgba(255,255,255,0.6)' });
+    Object.assign(codeLabel.style, { fontSize: '14px', color: 'rgba(255,255,255,0.5)', letterSpacing: '1px' });
     this.overlay.appendChild(codeLabel);
 
     this.codeEl = document.createElement('div');
     Object.assign(this.codeEl.style, {
       fontSize: '36px',
       fontWeight: 'bold',
-      letterSpacing: '6px',
+      letterSpacing: '8px',
       color: '#fff',
       marginBottom: '8px',
       cursor: 'pointer',
+      textShadow: '0 0 15px rgba(255, 200, 50, 0.2)',
+      transition: 'text-shadow 0.2s',
     });
     this.codeEl.title = 'Click to copy';
     this.codeEl.addEventListener('pointerdown', () => {
       navigator.clipboard?.writeText(this.codeEl.textContent || '');
+      this.codeEl.style.textShadow = '0 0 25px rgba(255, 200, 50, 0.6)';
+      setTimeout(() => {
+        this.codeEl.style.textShadow = '0 0 15px rgba(255, 200, 50, 0.2)';
+      }, 400);
     });
     this.overlay.appendChild(this.codeEl);
 
@@ -64,18 +76,31 @@ export class LobbyScreen {
       padding: '8px 20px',
       fontSize: '14px',
       borderRadius: '6px',
-      border: '1px solid rgba(255,255,255,0.3)',
-      background: 'rgba(255,255,255,0.1)',
+      border: '1px solid rgba(255,255,255,0.2)',
+      background: 'rgba(255,255,255,0.08)',
       color: '#fff',
       cursor: 'pointer',
       marginBottom: '8px',
+      transition: 'background 0.15s, transform 0.1s',
+    });
+    this.shareBtn.addEventListener('pointerenter', () => {
+      this.shareBtn.style.background = 'rgba(255,255,255,0.18)';
+      this.shareBtn.style.transform = 'scale(1.03)';
+    });
+    this.shareBtn.addEventListener('pointerleave', () => {
+      this.shareBtn.style.background = 'rgba(255,255,255,0.08)';
+      this.shareBtn.style.transform = 'scale(1)';
     });
     this.shareBtn.addEventListener('pointerdown', () => {
       const code = this.codeEl.textContent || '';
       const url = `${location.origin}${location.pathname}?room=${code}`;
       navigator.clipboard?.writeText(url);
       this.shareBtn.textContent = 'Copied!';
-      setTimeout(() => { this.shareBtn.textContent = 'Share Link'; }, 2000);
+      this.shareBtn.style.background = 'rgba(46, 204, 113, 0.3)';
+      setTimeout(() => {
+        this.shareBtn.textContent = 'Share Link';
+        this.shareBtn.style.background = 'rgba(255,255,255,0.08)';
+      }, 2000);
     });
     this.overlay.appendChild(this.shareBtn);
 
@@ -83,7 +108,7 @@ export class LobbyScreen {
     const playersLabel = document.createElement('div');
     playersLabel.textContent = 'Players:';
     Object.assign(playersLabel.style, {
-      fontSize: '14px', color: 'rgba(255,255,255,0.6)', marginTop: '12px',
+      fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginTop: '12px', letterSpacing: '1px',
     });
     this.overlay.appendChild(playersLabel);
 
@@ -102,24 +127,49 @@ export class LobbyScreen {
       fontSize: '20px',
       fontWeight: 'bold',
       borderRadius: '8px',
-      border: 'none',
-      background: 'rgba(46, 204, 113, 0.3)',
+      border: '1px solid rgba(46, 204, 113, 0.3)',
+      background: 'rgba(46, 204, 113, 0.25)',
       color: '#fff',
       cursor: 'pointer',
       marginTop: '16px',
-      display: 'none', // hidden until host
+      display: 'none',
+      transition: 'background 0.15s, transform 0.1s, box-shadow 0.15s',
     });
-    this.startBtn.addEventListener('pointerdown', () => this.onStart?.());
+    this.startBtn.addEventListener('pointerenter', () => {
+      this.startBtn.style.background = 'rgba(46, 204, 113, 0.4)';
+      this.startBtn.style.transform = 'scale(1.03)';
+      this.startBtn.style.boxShadow = '0 0 15px rgba(46, 204, 113, 0.25)';
+    });
+    this.startBtn.addEventListener('pointerleave', () => {
+      this.startBtn.style.background = 'rgba(46, 204, 113, 0.25)';
+      this.startBtn.style.transform = 'scale(1)';
+      this.startBtn.style.boxShadow = 'none';
+    });
+    this.startBtn.addEventListener('pointerdown', () => {
+      this.startBtn.style.transform = 'scale(0.97)';
+      this.onStart?.();
+    });
+    this.startBtn.addEventListener('pointerup', () => {
+      this.startBtn.style.transform = 'scale(1.03)';
+    });
     this.overlay.appendChild(this.startBtn);
 
-    // Waiting text (for non-hosts)
-    const waitingEl = document.createElement('div');
-    waitingEl.id = 'lobby-waiting';
-    waitingEl.textContent = 'Waiting for host to start...';
-    Object.assign(waitingEl.style, {
+    // Waiting text (for non-hosts) — pulsing
+    this.waitingEl = document.createElement('div');
+    this.waitingEl.textContent = 'Waiting for host to start...';
+    Object.assign(this.waitingEl.style, {
       fontSize: '14px', color: 'rgba(255,255,255,0.4)', marginTop: '16px',
+      animation: 'lobby-pulse 2s ease-in-out infinite',
     });
-    this.overlay.appendChild(waitingEl);
+    this.overlay.appendChild(this.waitingEl);
+
+    // Inject pulse keyframe if not already present
+    if (!document.getElementById('lobby-pulse-style')) {
+      const style = document.createElement('style');
+      style.id = 'lobby-pulse-style';
+      style.textContent = `@keyframes lobby-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }`;
+      document.head.appendChild(style);
+    }
 
     this.overlay.style.display = 'none';
     parent.appendChild(this.overlay);
@@ -134,15 +184,20 @@ export class LobbyScreen {
     for (const p of players) {
       const el = document.createElement('div');
       el.textContent = p.displayName;
-      Object.assign(el.style, { fontSize: '18px', color: '#fff' });
+      Object.assign(el.style, {
+        fontSize: '18px', color: '#fff',
+        padding: '4px 16px',
+        background: 'rgba(255,255,255,0.06)',
+        borderRadius: '4px',
+        animation: 'lobby-pulse 0.3s ease-out',
+      });
       this.playerListEl.appendChild(el);
     }
   }
 
   setIsHost(isHost: boolean) {
     this.startBtn.style.display = isHost ? 'block' : 'none';
-    const waiting = this.overlay.querySelector('#lobby-waiting') as HTMLElement;
-    if (waiting) waiting.style.display = isHost ? 'none' : 'block';
+    this.waitingEl.style.display = isHost ? 'none' : 'block';
   }
 
   setStatus(text: string | null, isError = false) {
@@ -157,8 +212,24 @@ export class LobbyScreen {
 
   onStartMatch(cb: () => void) { this.onStart = cb; }
 
-  show() { this.overlay.style.display = 'flex'; }
-  hide() { this.overlay.style.display = 'none'; }
+  show() {
+    if (this.hideTimeoutId !== null) {
+      clearTimeout(this.hideTimeoutId);
+      this.hideTimeoutId = null;
+    }
+    this.overlay.style.display = 'flex';
+    void this.overlay.offsetHeight;
+    this.overlay.style.opacity = '1';
+  }
+
+  hide() {
+    this.overlay.style.opacity = '0';
+    if (this.hideTimeoutId !== null) clearTimeout(this.hideTimeoutId);
+    this.hideTimeoutId = window.setTimeout(() => {
+      this.overlay.style.display = 'none';
+      this.hideTimeoutId = null;
+    }, 300);
+  }
 
   dispose() { this.overlay.remove(); }
 }

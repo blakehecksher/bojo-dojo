@@ -7,7 +7,7 @@ const COLOR_MID = new THREE.Color(0x8b7d3c);   // olive/brown mid
 const COLOR_HIGH = new THREE.Color(0x9e9076);   // tan/grey ridge
 
 /**
- * Creates a flat-shaded terrain mesh from a heightmap.
+ * Creates a terrain mesh from a heightmap.
  * Vertices are positioned in world space centered at origin.
  */
 export function createTerrainMesh(heightmap: HeightmapData): THREE.Mesh {
@@ -69,10 +69,11 @@ export function createTerrainMesh(heightmap: HeightmapData): THREE.Mesh {
 
   const material = new THREE.MeshLambertMaterial({
     vertexColors: true,
-    flatShading: true,
+    side: THREE.DoubleSide,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+  mesh.receiveShadow = true;
   return mesh;
 }

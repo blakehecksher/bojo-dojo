@@ -63,9 +63,9 @@ export class Thumbstick implements InputHandler {
   }
 
   private updateZone = () => {
-    // Hit zone: left 30% of screen, bottom 50%
-    this.zoneRight = window.innerWidth * 0.30;
-    this.zoneTop = window.innerHeight * 0.50;
+    // Hit zone: tight area around stick (bottom-left corner)
+    this.zoneRight = window.innerWidth * 0.20;
+    this.zoneTop = window.innerHeight * 0.65;
   };
 
   hitTest(x: number, y: number): boolean {
@@ -90,7 +90,10 @@ export class Thumbstick implements InputHandler {
     this.activePointer = null;
     this.dx = 0;
     this.dy = 0;
+    // Smooth snap-back with overshoot
+    this.knob.style.transition = 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)';
     this.knob.style.transform = 'translate(-50%, -50%)';
+    setTimeout(() => { this.knob.style.transition = 'none'; }, 200);
   }
 
   private updateStick(px: number, py: number) {
@@ -117,8 +120,24 @@ export class Thumbstick implements InputHandler {
     } else {
       // Rescale so output starts at 0 right after dead zone
       const scale = (mag - DEAD_ZONE) / (1 - DEAD_ZONE) / mag;
-      this.dx = nx * scale;
-      this.dy = ny * scale;
+      let outX = nx * scale;
+      let outY = ny * scale;
+
+      // Weight cardinal directions: reduce diagonal movement while keeping
+      // cardinal (up/down/left/right) at full speed.
+      // cardinality = 1 when perfectly cardinal, 0 when at 45 degrees
+      const ax = Math.abs(outX);
+      const ay = Math.abs(outY);
+      const maxAx = Math.max(ax, ay);
+      if (maxAx > 0.001) {
+        const cardinality = Math.abs(ax - ay) / maxAx; // 0 = diagonal, 1 = cardinal
+        const diagonalDampen = 0.55 + 0.45 * cardinality; // 0.55 at diagonal, 1.0 at cardinal
+        outX *= diagonalDampen;
+        outY *= diagonalDampen;
+      }
+
+      this.dx = outX;
+      this.dy = outY;
     }
 
     // Move knob visual

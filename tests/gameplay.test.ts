@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
  * Input is simulated via pointer events on the canvas (right-25% = pull slider zone).
  */
 
-const STARTING_ARROWS = 5;
+const STARTING_ARROWS = 7;
 
 test.describe('Offline gameplay', () => {
   test.beforeEach(async ({ page }) => {
@@ -138,6 +138,7 @@ test.describe('Lobby screen', () => {
 
     await page.evaluate(() => {
       const g = (window as any).__game;
+      g.menuScreen.hide();
       g.lobbyScreen.setRoomCode('TEST');
       g.lobbyScreen.show();
     });

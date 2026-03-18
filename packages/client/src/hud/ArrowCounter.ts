@@ -1,7 +1,8 @@
 import { PACING } from '@bojo-dojo/common';
 
 /**
- * Arrow count display — top-left corner.
+ * Arrow count state holder kept for gameplay logic.
+ * The visible ammo UI lives in the bottom inventory bar.
  */
 export class ArrowCounter {
   private el: HTMLDivElement;
@@ -16,10 +17,13 @@ export class ArrowCounter {
       position: 'absolute',
       top: '16px',
       left: '16px',
-      fontSize: '18px',
+      display: 'none',
+      fontSize: '20px',
       fontWeight: 'bold',
       textShadow: '1px 1px 3px rgba(0,0,0,0.8)',
       pointerEvents: 'none',
+      transition: 'transform 0.15s ease-out, color 0.3s',
+      transformOrigin: 'left center',
     });
 
     // Arrow icon (unicode)
@@ -37,8 +41,24 @@ export class ArrowCounter {
   get count() { return this._count; }
 
   set count(val: number) {
+    const prev = this._count;
     this._count = Math.max(0, val);
     this.countEl.textContent = String(this._count);
+
+    // Pop animation on decrement
+    if (val < prev) {
+      this.el.style.transform = 'scale(1.3)';
+      setTimeout(() => { this.el.style.transform = 'scale(1)'; }, 150);
+    }
+
+    // Low ammo warning
+    if (this._count <= 2 && this._count > 0) {
+      this.el.style.color = '#ffc832';
+    } else if (this._count === 0) {
+      this.el.style.color = '#ff4444';
+    } else {
+      this.el.style.color = '#ffffff';
+    }
   }
 
   dispose() {

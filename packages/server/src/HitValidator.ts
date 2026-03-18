@@ -1,42 +1,53 @@
-import type { Vec3, HeightmapData } from '@bojo-dojo/common';
+import type { ArrowType, HeightmapData, PickupState, Vec3 } from '@bojo-dojo/common';
 import {
-  computeTrajectory, forceToSpeed, checkTrajectoryHits, sampleHeight,
+  checkTrajectoryHits,
+  checkTrajectoryPickupHits,
+  computeTrajectory,
+  forceToSpeed,
+  sampleHeight,
 } from '@bojo-dojo/common';
 import type { HitResult } from '@bojo-dojo/common';
 import type { PlayerInfo } from './Room';
 
-/**
- * Server-authoritative hit validation.
- * Computes the full trajectory and checks against all player hitboxes.
- */
-export function validateArrowHit(
+export function validateArrowResolution(
   origin: Vec3,
   direction: Vec3,
   force: number,
   shooterId: string,
+  arrowType: ArrowType,
   players: Map<string, PlayerInfo>,
-  spawns: Record<string, Vec3>,
+  pickups: PickupState[],
   heightmap: HeightmapData,
-): { hit: HitResult | null; landingPosition: Vec3 } {
-  const speed = forceToSpeed(force);
-
-  const trajectory = computeTrajectory(origin, direction, speed, {
+): {
+  trajectory: ReturnType<typeof computeTrajectory>;
+  playerHit: HitResult | null;
+  pickupHit: HitResult | null;
+  landingPosition: Vec3;
+  arrowType: ArrowType;
+} {
+  const trajectory = computeTrajectory(origin, direction, forceToSpeed(force), {
     getTerrainHeight: (x, z) => sampleHeight(heightmap, x, z),
   });
 
-  // Build player list (only alive players)
-  const targetPlayers: Array<{ id: string; position: Vec3 }> = [];
-  for (const [id, info] of players) {
-    if (id === shooterId || !info.alive) continue;
-    const pos = spawns[id];
-    if (pos) targetPlayers.push({ id, position: pos });
-  }
+  const activePlayers = [...players.values()]
+    .filter((player) => player.id !== shooterId && player.alive)
+    .map((player) => ({ id: player.id, position: player.position }));
 
-  const hit = checkTrajectoryHits(trajectory, targetPlayers, shooterId);
+  const activePickups = pickups
+    .filter((pickup) => pickup.active)
+    .map((pickup) => ({ id: pickup.id, position: pickup.position }));
 
-  // Landing position is the last point in trajectory
-  const lastPoint = trajectory[trajectory.length - 1];
-  const landingPosition = lastPoint.position;
+  const playerHit = arrowType === 'normal'
+    ? checkTrajectoryHits(trajectory, activePlayers, shooterId)
+    : null;
+  const pickupHit = checkTrajectoryPickupHits(trajectory, activePickups);
+  const landingPosition = trajectory[trajectory.length - 1].position;
 
-  return { hit, landingPosition };
+  return {
+    trajectory,
+    playerHit,
+    pickupHit,
+    landingPosition,
+    arrowType,
+  };
 }

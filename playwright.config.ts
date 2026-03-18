@@ -6,7 +6,7 @@ export default defineConfig({
   fullyParallel: false, // game tests are stateful, run sequentially
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://127.0.0.1:4173',
     // Headless with WebGL support
     launchOptions: {
       args: ['--use-gl=egl', '--disable-web-security'],
@@ -14,17 +14,17 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'pnpm dev',
-      url: 'http://localhost:5173',
-      reuseExistingServer: true,
+      command: 'pnpm --filter @bojo-dojo/client exec vite --host 127.0.0.1 --port 4173 --strictPort',
+      url: 'http://127.0.0.1:4173',
+      reuseExistingServer: false,
       timeout: 30_000,
       // Override .env so Vite connects to local PartyKit for tests
-      env: { VITE_PARTYKIT_HOST: 'localhost:1999' },
+      env: { VITE_PARTYKIT_HOST: '127.0.0.1:21999' },
     },
     {
-      command: 'pnpm dev:server',
-      port: 1999,
-      reuseExistingServer: true,
+      command: 'pnpm --filter @bojo-dojo/server exec partykit dev --port 21999',
+      port: 21999,
+      reuseExistingServer: false,
       timeout: 30_000,
     },
   ],

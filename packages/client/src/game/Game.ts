@@ -1,207 +1,248 @@
 import {
-  generateHeightmap, sampleHeight, generateSpawnPoints, checkTrajectoryHits,
-  TERRAIN_BASE, SPAWN, INPUT, PACING,
-  computeTrajectory, forceToSpeed, getPreviewPoints,
+  ArrowType,
+  INPUT,
+  MatchState,
+  PACING,
+  PlayerPublicState,
+  SPAWN,
+  type HeightmapData,
+  type ServerMessage,
+  type TrajectoryPoint,
+  type Vec3,
+  type WorldLayout,
+  type ZoneState,
+  checkTrajectoryHits,
+  computeTrajectory,
+  forceToSpeed,
+  generateHeightmap,
+  generateWorldLayout,
+  getPreviewPoints,
+  sampleHeight,
 } from '@bojo-dojo/common';
-import type { Vec3, TrajectoryPoint, ServerMessage, HeightmapData } from '@bojo-dojo/common';
 import * as THREE from 'three';
-import { SceneManager } from '../renderer/SceneManager';
-import { createTerrainMesh } from '../renderer/TerrainMesh';
-import { createSky } from '../renderer/SkyBox';
-import { placeObstacles } from '../renderer/ObstaclePlacer';
+import { AudioManager } from '../audio/AudioManager';
+import { HUD } from '../hud/HUD';
 import { InputManager } from '../input/InputManager';
+import { PullSlider } from '../input/PullSlider';
 import { SwipeCamera } from '../input/SwipeCamera';
 import { Thumbstick } from '../input/Thumbstick';
-import { PullSlider } from '../input/PullSlider';
-import { HUD } from '../hud/HUD';
-import { BowModel } from '../renderer/BowModel';
-import { TrajectoryLine } from '../renderer/TrajectoryLine';
-import { ArrowModel } from '../renderer/ArrowModel';
-import { PlayerMarker } from '../renderer/PlayerMarker';
-import { Round } from './Round';
-import { RoundEndScreen } from '../screens/RoundEndScreen';
-import { MenuScreen } from '../screens/MenuScreen';
-import { LobbyScreen } from '../screens/LobbyScreen';
-import { AudioManager } from '../audio/AudioManager';
-import { LoadingScreen } from '../screens/LoadingScreen';
 import { GameConnection } from '../network/PartySocket';
+import { ArrowModel } from '../renderer/ArrowModel';
+import { BowModel } from '../renderer/BowModel';
+import { placeObstacles } from '../renderer/ObstaclePlacer';
+import { PickupMarkers } from '../renderer/PickupMarkers';
+import { PlayerMarker } from '../renderer/PlayerMarker';
+import { SceneManager } from '../renderer/SceneManager';
+import { createSky } from '../renderer/SkyBox';
+import { createTerrainMesh } from '../renderer/TerrainMesh';
+import { TrajectoryLine } from '../renderer/TrajectoryLine';
+import { ZoneRing } from '../renderer/ZoneRing';
+import { LoadingScreen } from '../screens/LoadingScreen';
+import { LobbyScreen } from '../screens/LobbyScreen';
+import { MenuScreen } from '../screens/MenuScreen';
+import { RoundEndScreen } from '../screens/RoundEndScreen';
+import { Round } from './Round';
 
 const DEG2RAD = Math.PI / 180;
-
-// PartyKit host — configured via Vite env var, defaults to localhost
 const PARTYKIT_HOST = (import.meta as { env?: Record<string, string> }).env?.VITE_PARTYKIT_HOST || `${window.location.hostname}:1999`;
 
 export type GamePhase = 'menu' | 'lobby' | 'playing' | 'offline';
 
-/**
- * Top-level game orchestrator.
- * Manages state machine: menu -> lobby -> playing (or offline single-player).
- */
+function cloneVec3(position: Vec3): Vec3 {
+  return { x: position.x, y: position.y, z: position.z };
+}
+
+function distanceSquared(a: Vec3, b: Vec3): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
 export class Game {
-  // Core
   private sceneManager: SceneManager;
   private hud: HUD;
   private audio: AudioManager;
-
-  // Screens
   private menuScreen: MenuScreen;
   private lobbyScreen: LobbyScreen;
   private roundEndScreen: RoundEndScreen;
   private loadingScreen: LoadingScreen;
-
-  // Input
   private inputManager!: InputManager;
   private thumbstick!: Thumbstick;
   private pullSlider!: PullSlider;
   private swipeCamera!: SwipeCamera;
-
-  // Rendering
   private bowModel!: BowModel;
   private trajectoryLine!: TrajectoryLine;
+  private zoneRing!: ZoneRing;
+  private pickupMarkers!: PickupMarkers;
   private activeArrows: ArrowModel[] = [];
+  private landedArrowMeshes = new Map<string, ArrowModel>();
   private playerMarkers = new Map<string, PlayerMarker>();
-
-  // State
   phase: GamePhase = 'menu';
+  private world: WorldLayout | null = null;
+  private worldKey: string | null = null;
+  private worldInitKey: string | null = null;
+  private worldInitPromise: Promise<void> | null = null;
+  private matchState: MatchState | null = null;
   private heightmap: HeightmapData | null = null;
   private seed = 0;
   private localPlayerId = 'local';
   private spawns: Record<string, Vec3> = {};
   private isDrawing = false;
-  private drawSoundKey: string | null = null;
   private round!: Round;
   private roundActive = false;
-
-  // Network
+  private selectedArrowType: ArrowType = 'normal';
+  private remoteViews = new Map<string, { yaw: number; pitch: number }>();
+  private spectatorTargetId: string | null = null;
+  private currentZone: ZoneState | null = null;
   private connection: GameConnection;
   private isHost = false;
   private lobbyPlayers: Array<{ id: string; displayName: string }> = [];
-
-  // HUD menu button (visible during gameplay)
-  private hudMenuBtn!: HTMLButtonElement;
-
-  // Terrain objects to clean up between matches
   private terrainObjects: THREE.Object3D[] = [];
+  private viewSyncIntervalId: number | null = null;
+  private offlineEnemyAlive = true;
+  private offlineArrowCount = PACING.STARTING_ARROWS;
+  private offlineTeleportArrows = PACING.TELEPORT_ARROWS_PER_ROUND;
+  private offlineHasShield = false;
+  private matchStateRetryId: number | null = null;
+  private pendingTeleportArrow: ArrowModel | null = null;
+  private pendingTeleportPos: Vec3 | null = null;
 
   constructor() {
     this.sceneManager = new SceneManager();
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.connection = new GameConnection();
-
-    // Screens
     this.menuScreen = new MenuScreen(this.hud.element);
     this.lobbyScreen = new LobbyScreen(this.hud.element);
     this.roundEndScreen = new RoundEndScreen(this.hud.element);
     this.loadingScreen = new LoadingScreen(this.hud.element);
 
-    // Audio unlock + fullscreen + orientation lock on first interaction
-    const unlockOnFirstTap = () => {
+    const unlockAudio = () => {
       this.audio.unlock();
       document.documentElement.requestFullscreen?.({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
-      (screen.orientation as { lock?: (o: string) => Promise<void> })?.lock?.('landscape').catch(() => {});
-      document.removeEventListener('pointerdown', unlockOnFirstTap);
     };
-    document.addEventListener('pointerdown', unlockOnFirstTap);
-
-    // Pause/resume when tab visibility changes
+    // Unlock on first tap, and re-unlock on subsequent taps if browser re-suspended
+    document.addEventListener('pointerdown', unlockAudio, { once: false });
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        this.round.pause();
-        this.sceneManager.pause();
-      } else {
-        this.round.resume();
-        this.sceneManager.resume();
-      }
+      if (document.visibilityState === 'hidden') this.sceneManager.pause();
+      else this.sceneManager.resume();
     });
 
     this.setupInput();
+    this.setupHUDButtons();
     this.setupMenuHandlers();
     this.setupNetworkHandlers();
     this.setupConnectionStateHandlers();
     this.setupFrameLoop();
-    this.setupHUDMenuButton();
-
-    // Check URL for room code (join via shared link)
-    const urlParams = new URLSearchParams(window.location.search);
-    const roomFromUrl = urlParams.get('room');
+    this.setupViewSync();
+    const roomFromUrl = new URLSearchParams(window.location.search).get('room');
     this.showMenu();
-    if (roomFromUrl) {
-      this.menuScreen.setJoinCode(roomFromUrl);
-    }
-
+    if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
     this.sceneManager.start();
   }
 
-  // --- Setup ---
+  private getLocalPlayerState(): PlayerPublicState | null {
+    return this.matchState?.players.find((player) => player.id === this.localPlayerId) ?? null;
+  }
+
+  private canAct() {
+    if (this.phase === 'offline') return this.roundActive;
+    const player = this.getLocalPlayerState();
+    return !!player
+      && this.phase === 'playing'
+      && this.matchState?.phase === 'playing'
+      && player.alive
+      && !player.spectating
+      && !player.isFletching;
+  }
+
+  private isSpectating() {
+    return !!this.getLocalPlayerState()?.spectating && this.phase === 'playing';
+  }
 
   private setupInput() {
     this.inputManager = new InputManager(this.sceneManager.renderer.domElement);
     this.thumbstick = new Thumbstick(this.hud.element);
     this.pullSlider = new PullSlider(this.hud.element);
     this.swipeCamera = new SwipeCamera(this.sceneManager.camera);
-
     this.inputManager.register(this.thumbstick);
     this.inputManager.register(this.pullSlider);
     this.inputManager.register(this.swipeCamera);
-
     this.bowModel = new BowModel(this.sceneManager.camera);
     this.trajectoryLine = new TrajectoryLine(this.sceneManager.scene);
-
+    this.zoneRing = new ZoneRing(this.sceneManager.scene);
+    this.pickupMarkers = new PickupMarkers(this.sceneManager.scene);
     this.round = new Round({
-      onTick: (r) => this.hud.timer.sync(r),
+      onTick: (remaining) => this.hud.timer.sync(remaining),
       onEnd: (reason) => {
         this.roundActive = false;
-        if (reason === 'timeout') {
-          this.roundEndScreen.show('Time\'s Up!', 'Draw — tap to continue', () => {
-            if (this.phase === 'offline') this.startOfflineRound();
-          });
+        if (reason === 'timeout' && this.phase === 'offline') {
+          this.roundEndScreen.show('Time\'s Up!', 'Tap to play again', () => this.startOfflineRound());
         }
       },
     });
-
     this.pullSlider.on({
       onDrawStart: () => {
+        if (!this.canAct() || !this.heightmap) return;
         this.isDrawing = true;
-        this.drawSoundKey = this.audio.play('bow-draw');
       },
       onDrawChange: (force) => {
+        if (!this.isDrawing) return;
         this.bowModel.setDrawForce(force);
-        if (force > INPUT.PULL_SLIDER_CANCEL_ZONE && this.heightmap) {
-          this.trajectoryLine.update(
-            getPreviewPoints(this.computeTrajectory(force))
-          );
-        } else {
+        this.hud.crosshair.setDrawForce(force);
+        if (force <= INPUT.PULL_SLIDER_CANCEL_ZONE || !this.heightmap) {
           this.trajectoryLine.hide();
         }
       },
       onFire: (force) => {
-        if (this.drawSoundKey) { this.audio.stop(this.drawSoundKey); this.drawSoundKey = null; }
+        if (!this.isDrawing) return;
         this.audio.play('bow-release');
         this.fireArrow(force);
       },
       onCancel: () => {
-        if (this.drawSoundKey) { this.audio.stop(this.drawSoundKey); this.drawSoundKey = null; }
-        this.bowModel.setDrawForce(0);
-        this.trajectoryLine.hide();
-        this.isDrawing = false;
+        this.resetDrawState();
       },
+    });
+  }
+
+  private setupHUDButtons() {
+    this.hud.fletchButton.onPress(() => {
+      if (this.phase === 'offline') return;
+      const player = this.getLocalPlayerState();
+      if (!player || !player.alive || player.spectating || this.matchState?.phase !== 'playing') return;
+      this.connection.send({ type: player.isFletching ? 'FLETCH_CANCEL' : 'FLETCH_START' });
+    });
+    this.hud.teleportButton.onPress(() => {
+      if (this.phase === 'offline') {
+        if (this.offlineTeleportArrows <= 0) return;
+        this.selectedArrowType = this.selectedArrowType === 'normal' ? 'teleport' : 'normal';
+        this.syncHudState();
+        return;
+      }
+      const player = this.getLocalPlayerState();
+      if (this.phase !== 'playing' || !player || player.teleportArrows <= 0) return;
+      this.selectedArrowType = this.selectedArrowType === 'normal' ? 'teleport' : 'normal';
+      this.syncHudState();
+    });
+    this.hud.spectatorButton.onPress(() => {
+      this.cycleSpectatorTarget();
     });
   }
 
   private setupMenuHandlers() {
     this.menuScreen.on({
-      onCreate: (name) => {
+      onCreate: (name, colorIndex) => {
         const roomCode = this.generateRoomCode();
-        this.connection.connect(PARTYKIT_HOST, roomCode, name);
+        this.connection.connect(PARTYKIT_HOST, roomCode, name, colorIndex);
         this.phase = 'lobby';
         this.menuScreen.hide();
         this.lobbyScreen.setRoomCode(roomCode);
         this.lobbyScreen.setStatus('Connecting...');
         this.lobbyScreen.show();
       },
-      onJoin: (code, name) => {
-        this.connection.connect(PARTYKIT_HOST, code, name);
+      onJoin: (code, name, colorIndex) => {
+        this.connection.connect(PARTYKIT_HOST, code, name, colorIndex);
         this.phase = 'lobby';
         this.menuScreen.hide();
         this.lobbyScreen.setRoomCode(code);
@@ -212,7 +253,6 @@ export class Game {
         this.startOffline();
       },
     });
-
     this.lobbyScreen.onStartMatch(() => {
       this.connection.send({ type: 'START_MATCH' });
     });
@@ -228,54 +268,95 @@ export class Game {
           this.lobbyScreen.setPlayers(msg.players);
           this.lobbyScreen.setIsHost(msg.isHost);
           break;
-
+        case 'MATCH_STATE':
+          this.stopMatchStateRetry();
+          try {
+            await this.applyMatchState(msg.state);
+          } catch (error) {
+            console.error('MATCH_STATE apply failed', error);
+          }
+          break;
+        case 'ROOM_LOCKED':
+          this.lobbyScreen.setStatus(msg.reason, true);
+          break;
         case 'PLAYER_JOINED':
-          this.lobbyPlayers.push({ id: msg.playerId, displayName: msg.displayName });
+          this.lobbyPlayers = [...this.lobbyPlayers, { id: msg.playerId, displayName: msg.displayName }];
           this.lobbyScreen.setPlayers(this.lobbyPlayers);
           break;
-
         case 'PLAYER_LEFT':
-          this.lobbyPlayers = this.lobbyPlayers.filter((p) => p.id !== msg.playerId);
+          this.lobbyPlayers = this.lobbyPlayers.filter((player) => player.id !== msg.playerId);
           this.lobbyScreen.setPlayers(this.lobbyPlayers);
-          // Remove player marker if in game
-          const marker = this.playerMarkers.get(msg.playerId);
-          if (marker) { marker.dispose(); this.playerMarkers.delete(msg.playerId); }
+          if (this.playerMarkers.has(msg.playerId)) {
+            this.playerMarkers.get(msg.playerId)?.dispose();
+            this.playerMarkers.delete(msg.playerId);
+          }
           break;
-
-        case 'MAP_SEED':
-          this.seed = msg.seed;
-          break;
-
-        case 'SPAWN_ASSIGNMENT':
-          this.spawns = msg.spawns;
-          await this.initGameWorld();
-          this.lobbyScreen.hide();
-          this.phase = 'playing';
-          break;
-
         case 'ROUND_START':
-          this.startNetworkRound();
+          this.phase = 'playing';
+          this.menuScreen.hide();
+          this.lobbyScreen.hide();
+                    this.roundEndScreen.hide();
+          this.roundActive = true;
+          this.resetDrawState();
+          this.clearRenderedArrows();
+          this.startMatchStateRetry();
           break;
-
-        case 'TIMER_SYNC':
-          this.hud.timer.sync(msg.remainingSeconds);
-          break;
-
         case 'ARROW_FIRED':
-          // Another player fired — animate their arrow locally
-          this.animateRemoteArrow(msg);
+          this.animateRemoteArrow(msg.origin, msg.direction, msg.force);
           break;
-
+        case 'ARROW_LANDED':
+          this.ensureLandedArrow(msg.arrowId, msg.position);
+          break;
         case 'PLAYER_HIT':
-          this.handlePlayerHit(msg.targetId);
+          this.handlePlayerHit(msg.targetId, msg.blockedByShield);
           break;
-
         case 'ROUND_END':
           this.handleRoundEnd(msg.winnerId, msg.scores);
           break;
-
         case 'MATCH_OVER':
           this.handleMatchOver(msg.winnerId, msg.scores);
+          break;
+        case 'FLETCH_START':
+          if (msg.playerId === this.localPlayerId) this.hud.statusBanner.show(`Fletching... ${msg.durationSeconds}s`);
+          break;
+        case 'FLETCH_COMPLETE':
+          if (msg.playerId === this.localPlayerId) {
+            this.hud.statusBanner.show(`Arrow crafted (${msg.arrows})`);
+            setTimeout(() => this.hud.statusBanner.hide(), 1200);
+          }
+          break;
+        case 'PLAYER_TELEPORT':
+          if (msg.playerId === this.localPlayerId) {
+            // Store position — will apply when the arrow animation lands
+            this.pendingTeleportPos = { ...msg.position };
+          } else {
+            this.playerMarkers.get(msg.playerId)?.setPosition(msg.position.x, msg.position.y, msg.position.z);
+          }
+          break;
+        case 'PICKUP_ACQUIRED':
+          if (msg.playerId === this.localPlayerId) {
+            this.hud.statusBanner.show(`Picked up ${msg.pickupType}`);
+            setTimeout(() => this.hud.statusBanner.hide(), 1200);
+          }
+          break;
+        case 'ZONE_UPDATE':
+          this.currentZone = msg.zone;
+          this.zoneRing.update(msg.zone);
+          break;
+        case 'ZONE_WARNING':
+          if (msg.playerId === this.localPlayerId) {
+            if (msg.remainingSeconds <= 0) {
+              this.hud.zoneBanner.hide();
+            } else {
+              this.hud.zoneBanner.show(`Return to zone: ${msg.remainingSeconds}s`, 'warning');
+            }
+          }
+          break;
+        case 'PLAYER_VIEW':
+          this.remoteViews.set(msg.playerId, { yaw: msg.yaw, pitch: msg.pitch });
+          break;
+        case 'TIMER_SYNC':
+          this.hud.timer.sync(msg.remainingSeconds);
           break;
       }
     });
@@ -288,32 +369,16 @@ export class Game {
           case 'connecting':
             this.lobbyScreen.setStatus('Connecting...');
             break;
-
           case 'connected':
             this.lobbyScreen.setStatus('Connected', false);
-            // Clear the status after a moment
-            setTimeout(() => {
-              if (this.connection.state === 'connected') {
-                this.lobbyScreen.setStatus(null);
-              }
-            }, 1500);
             break;
-
           case 'error':
-            if (this.phase === 'lobby') {
-              this.lobbyScreen.setStatus(reason || 'Connection failed', true);
-            } else if (this.phase === 'playing') {
-              // Mid-game disconnect — return to menu
-              this.showMenu();
-            }
+            if (this.phase === 'lobby') this.lobbyScreen.setStatus(reason || 'Connection failed', true);
+            else if (this.phase === 'playing') this.showMenu();
             break;
-
           case 'closed':
-            if (this.phase === 'lobby') {
-              this.lobbyScreen.setStatus(reason || 'Disconnected', true);
-            } else if (this.phase === 'playing') {
-              this.showMenu();
-            }
+            if (this.phase === 'lobby') this.lobbyScreen.setStatus(reason || 'Disconnected', true);
+            else if (this.phase === 'playing') this.showMenu();
             break;
         }
       },
@@ -322,128 +387,315 @@ export class Game {
 
   private setupFrameLoop() {
     this.sceneManager.onFrame((dt) => {
-      // Thumbstick fine aim
-      if (this.thumbstick.dx !== 0 || this.thumbstick.dy !== 0) {
-        const speed = INPUT.THUMBSTICK_MAX_SPEED * DEG2RAD;
-        this.swipeCamera.applyDelta(
-          -this.thumbstick.dx * speed * dt,
-          -this.thumbstick.dy * speed * dt,
-        );
+      if (!this.isSpectating()) {
+        this.swipeCamera.update();
+        if (this.thumbstick.dx !== 0 || this.thumbstick.dy !== 0) {
+          const speed = INPUT.THUMBSTICK_MAX_SPEED * DEG2RAD;
+          this.swipeCamera.applyDelta(
+            -this.thumbstick.dx * speed * dt,
+            -this.thumbstick.dy * speed * dt,
+          );
+        }
+      } else {
+        this.updateSpectatorCamera();
       }
 
-      // Update trajectory preview while drawing
       if (this.isDrawing && this.pullSlider.force > INPUT.PULL_SLIDER_CANCEL_ZONE && this.heightmap) {
-        this.trajectoryLine.update(
-          getPreviewPoints(this.computeTrajectory(this.pullSlider.force))
-        );
+        this.trajectoryLine.update(getPreviewPoints(this.computePreviewTrajectory(this.pullSlider.force)));
       }
 
-      // Update arrow flights
-      for (const arrow of this.activeArrows) {
-        arrow.update(dt);
-      }
+      for (const arrow of [...this.activeArrows]) arrow.update(dt);
+      this.bowModel.update(dt);
+      for (const marker of this.playerMarkers.values()) marker.update(dt);
+      this.pickupMarkers.update(dt);
     });
   }
 
-  // --- Game World ---
-
-  private async initGameWorld() {
-    this.loadingScreen.show();
-    await new Promise(r => setTimeout(r, 0)); // yield so loading screen renders
-
-    this.clearWorld();
-
-    this.heightmap = generateHeightmap(this.seed, TERRAIN_BASE);
-
-    const terrain = createTerrainMesh(this.heightmap);
-    this.sceneManager.scene.add(terrain);
-    this.terrainObjects.push(terrain);
-
-    const sky = createSky();
-    this.sceneManager.scene.add(sky);
-    this.terrainObjects.push(sky);
-
-    const obstacles = placeObstacles(this.seed, this.heightmap, TERRAIN_BASE);
-    this.sceneManager.scene.add(obstacles);
-    this.terrainObjects.push(obstacles);
-
-    // Position camera at local spawn
-    const mySpawn = this.spawns[this.localPlayerId];
-    if (mySpawn) {
-      this.sceneManager.camera.position.set(
-        mySpawn.x,
-        mySpawn.y + SPAWN.PLAYER_EYE_HEIGHT,
-        mySpawn.z,
-      );
-    }
-
-    // Place markers for other players
-    let colorIdx = 0;
-    for (const [id, pos] of Object.entries(this.spawns)) {
-      if (id === this.localPlayerId) continue;
-      const marker = new PlayerMarker(this.sceneManager.scene, id, colorIdx++);
-      marker.setPosition(pos.x, pos.y, pos.z);
-      this.playerMarkers.set(id, marker);
-    }
-
-    this.loadingScreen.hide();
-    this.hudMenuBtn.style.display = 'block';
+  private setupViewSync() {
+    this.viewSyncIntervalId = window.setInterval(() => {
+      if (this.phase !== 'playing' || !this.connection.connected || this.isSpectating()) return;
+      const player = this.getLocalPlayerState();
+      if (!player || !player.alive) return;
+      const angles = this.swipeCamera.getAngles();
+      this.connection.send({ type: 'PLAYER_VIEW', yaw: angles.yaw, pitch: angles.pitch });
+    }, 200);
   }
 
-  private clearWorld() {
-    for (const obj of this.terrainObjects) {
-      this.sceneManager.scene.remove(obj);
+  private async applyMatchState(state: MatchState) {
+    const previousState = this.matchState;
+    const previousWorldKey = this.worldKey;
+    const previousLocal = previousState?.players.find((player) => player.id === this.localPlayerId) ?? null;
+    this.matchState = state;
+    this.lobbyPlayers = state.players.map((player) => ({ id: player.id, displayName: player.displayName }));
+    this.lobbyScreen.setPlayers(this.lobbyPlayers);
+    this.hud.timer.sync(state.roundTimeRemaining);
+    this.roundActive = state.phase === 'playing';
+
+    if (state.world) {
+      await this.ensureWorldLoaded(state.world);
+      this.syncNetworkPlayers(state.players);
+      this.pickupMarkers.sync(state.world.pickups);
+      this.syncLandedArrows(state.landedArrows);
+    } else {
+      this.pickupMarkers.sync([]);
+      this.syncLandedArrows([]);
     }
-    this.terrainObjects = [];
 
-    for (const [, marker] of this.playerMarkers) marker.dispose();
-    this.playerMarkers.clear();
+    this.currentZone = state.zone;
+    this.zoneRing.update(state.zone);
 
-    for (const arrow of this.activeArrows) arrow.dispose();
-    this.activeArrows = [];
-  }
+    // Hide zone banner if local player is back inside the zone
+    const localForZone = state.players.find((p) => p.id === this.localPlayerId);
+    if (localForZone && localForZone.zoneGraceRemaining === null) {
+      this.hud.zoneBanner.hide();
+    }
 
-  // --- Round Management ---
+    if (state.phase === 'lobby') {
+      this.phase = 'lobby';
+      this.lobbyScreen.setIsHost(this.isHost);
+      this.menuScreen.hide();
+      this.lobbyScreen.show();
+          } else {
+      this.phase = 'playing';
+      this.menuScreen.hide();
+      this.lobbyScreen.hide();
+          }
 
-  private startNetworkRound() {
-    this.roundEndScreen.hide();
-    this.roundActive = true;
-    this.hud.arrowCounter.count = PACING.STARTING_ARROWS;
-    this.bowModel.setDrawForce(0);
-    this.trajectoryLine.hide();
-    this.isDrawing = false;
-
-    // Reset player markers visibility
-    for (const [id, pos] of Object.entries(this.spawns)) {
-      if (id === this.localPlayerId) continue;
-      const marker = this.playerMarkers.get(id);
-      if (marker) {
-        marker.setPosition(pos.x, pos.y, pos.z);
-        marker.mesh.visible = true;
+    const local = this.getLocalPlayerState();
+    if (local) {
+      this.spawns = Object.fromEntries(state.players.map((player) => [player.id, cloneVec3(player.position)]));
+      if (!local.spectating) {
+        // Don't snap camera while a teleport arrow is in flight — it'll snap on landing
+        const teleportInFlight = !!this.pendingTeleportArrow;
+        const shouldSnapCamera = !teleportInFlight && (
+          !previousLocal
+          || previousState?.currentRound !== state.currentRound
+          || previousState?.phase !== state.phase
+          || previousWorldKey !== this.worldKey
+          || distanceSquared(previousLocal.position, local.position) > 9
+        );
+        const shouldReorient = !previousLocal
+          || previousState?.currentRound !== state.currentRound
+          || previousState?.phase !== state.phase
+          || previousWorldKey !== this.worldKey;
+        if (shouldSnapCamera) this.snapLocalCamera(local.position, shouldReorient);
+      } else if (!this.spectatorTargetId || !state.players.find((player) => player.id === this.spectatorTargetId && player.alive)) {
+        this.spectatorTargetId = state.players.find((player) => player.alive && player.id !== local.id)?.id ?? null;
       }
     }
 
-    // Clear arrows from previous round
-    for (const a of this.activeArrows) a.dispose();
-    this.activeArrows = [];
-
-    // Reset camera to spawn
-    const mySpawn = this.spawns[this.localPlayerId];
-    if (mySpawn) {
-      this.sceneManager.camera.position.set(
-        mySpawn.x,
-        mySpawn.y + SPAWN.PLAYER_EYE_HEIGHT,
-        mySpawn.z,
-      );
-    }
-
-    const extraPlayers = Math.max(0, Object.keys(this.spawns).length - 2);
-    const roundTime = PACING.BASE_ROUND_TIME + extraPlayers * PACING.TIME_PER_EXTRA_PLAYER;
-    this.round.start(roundTime);
-    this.hud.timer.start(roundTime);
+    this.syncHudState();
   }
 
-  // --- Arrow Mechanics ---
+  private snapLocalCamera(position: Vec3, reorient: boolean) {
+    this.sceneManager.camera.position.set(
+      position.x,
+      position.y + SPAWN.PLAYER_EYE_HEIGHT,
+      position.z,
+    );
+
+    if (!reorient) return;
+
+    const focusTarget = this.getSpawnFocusTarget(position);
+    const dx = focusTarget.x - position.x;
+    const dz = focusTarget.z - position.z;
+    const yaw = Math.abs(dx) + Math.abs(dz) > 0.001
+      ? Math.atan2(dx, -dz)
+      : 0;
+    this.swipeCamera.setLook(yaw, -0.18);
+  }
+
+  private getSpawnFocusTarget(position: Vec3): Vec3 {
+    const preferredTargets = [
+      ...Object.values(this.spawns).filter((spawn) => distanceSquared(spawn, position) > 36),
+      ...(this.world ? [this.world.zone.center] : []),
+      { x: 0, y: position.y, z: 0 },
+    ];
+
+    return preferredTargets[0] ?? { x: position.x, y: position.y, z: position.z - 12 };
+  }
+
+  private async ensureWorldLoaded(world: WorldLayout) {
+    const nextWorldKey = `${world.seed}:${world.terrain.mapSize}:${world.spawns.length}`;
+    if (this.worldKey === nextWorldKey) {
+      this.world = world;
+      this.seed = world.seed;
+      return;
+    }
+
+    if (this.worldInitKey === nextWorldKey && this.worldInitPromise) {
+      await this.worldInitPromise;
+      this.world = world;
+      this.seed = world.seed;
+      return;
+    }
+
+    this.worldInitKey = nextWorldKey;
+    this.worldInitPromise = this.initGameWorld(world);
+    try {
+      await this.worldInitPromise;
+    } finally {
+      if (this.worldInitKey === nextWorldKey) {
+        this.worldInitKey = null;
+        this.worldInitPromise = null;
+      }
+    }
+  }
+
+  private async initGameWorld(world: WorldLayout) {
+    const nextWorldKey = `${world.seed}:${world.terrain.mapSize}:${world.spawns.length}`;
+    const generatedHeightmap = generateHeightmap(world.seed, world.terrain);
+    this.world = world;
+    this.seed = world.seed;
+    this.heightmap = generatedHeightmap;
+    this.loadingScreen.show();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    this.clearWorld();
+
+    try {
+      const terrain = createTerrainMesh(generatedHeightmap);
+      this.sceneManager.scene.add(terrain);
+      this.terrainObjects.push(terrain);
+
+      const sky = createSky();
+      this.sceneManager.scene.add(sky);
+      this.terrainObjects.push(sky);
+
+      const obstacles = placeObstacles(world.obstacles);
+      this.sceneManager.scene.add(obstacles);
+      this.terrainObjects.push(obstacles);
+
+      // Only mark world as loaded AFTER all scene objects are successfully created
+      this.worldKey = nextWorldKey;
+    } catch (err) {
+      console.error('[initGameWorld] Failed to build scene objects:', err);
+      // Do NOT set worldKey so the next MATCH_STATE retries world creation
+      throw err;
+    } finally {
+      this.loadingScreen.hide();
+    }
+  }
+
+  private clearWorld() {
+    for (const object of this.terrainObjects) this.sceneManager.scene.remove(object);
+    this.terrainObjects = [];
+    for (const marker of this.playerMarkers.values()) marker.dispose();
+    this.playerMarkers.clear();
+    this.pickupMarkers.sync([]);
+    this.clearRenderedArrows();
+    this.zoneRing.update(null);
+  }
+
+  private clearRenderedArrows() {
+    for (const arrow of this.activeArrows) arrow.dispose();
+    this.activeArrows = [];
+    this.landedArrowMeshes.clear();
+  }
+
+  private syncNetworkPlayers(players: PlayerPublicState[]) {
+    const activeIds = new Set<string>();
+    for (const player of players) {
+      if (player.id === this.localPlayerId) continue;
+      activeIds.add(player.id);
+      let marker = this.playerMarkers.get(player.id);
+      if (!marker) {
+        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex);
+        this.playerMarkers.set(player.id, marker);
+      }
+      marker.setPosition(player.position.x, player.position.y, player.position.z);
+      marker.mesh.visible = player.alive;
+      marker.setShield(player.hasShield);
+    }
+    for (const [id, marker] of this.playerMarkers) {
+      if (activeIds.has(id)) continue;
+      marker.dispose();
+      this.playerMarkers.delete(id);
+    }
+  }
+
+  private syncLandedArrows(landedArrows: MatchState['landedArrows']) {
+    const ids = new Set(landedArrows.map((arrow) => arrow.id));
+    for (const arrow of landedArrows) this.ensureLandedArrow(arrow.id, arrow.position);
+    for (const [id, arrow] of this.landedArrowMeshes) {
+      if (ids.has(id)) continue;
+      this.disposeArrow(arrow);
+      this.landedArrowMeshes.delete(id);
+    }
+  }
+
+  private ensureLandedArrow(id: string, position: Vec3) {
+    if (this.landedArrowMeshes.has(id)) return;
+    const arrow = new ArrowModel(this.sceneManager.scene, false);
+    arrow.placeAt(position.x, position.y, position.z);
+    this.landedArrowMeshes.set(id, arrow);
+    this.activeArrows.push(arrow);
+  }
+
+  private syncHudState() {
+    const local = this.getLocalPlayerState();
+    if (this.phase === 'offline') {
+      if (this.selectedArrowType === 'teleport' && this.offlineTeleportArrows <= 0) this.selectedArrowType = 'normal';
+      this.hud.arrowCounter.count = this.offlineArrowCount;
+      this.hud.inventory.setInventory({
+        arrows: this.offlineArrowCount,
+        teleportArrows: this.offlineTeleportArrows,
+        hasShield: this.offlineHasShield,
+        selectedArrowType: this.selectedArrowType,
+      });
+      this.hud.fletchButton.setVisible(false);
+      this.hud.teleportButton.setVisible(this.roundActive);
+      this.hud.teleportButton.setEnabled(this.offlineTeleportArrows > 0);
+      this.hud.teleportButton.setLabel(this.selectedArrowType === 'teleport' ? 'Teleport Armed' : 'Teleport');
+      this.hud.spectatorButton.setVisible(false);
+      this.hud.zoneBanner.hide();
+      this.hud.statusBanner.hide();
+      this.bowModel.setVisible(true);
+      this.swipeCamera.setEnabled(true);
+      this.swipeCamera.setForcedPitchOffset(0);
+      return;
+    }
+
+    if (!local) {
+      this.hud.fletchButton.setVisible(false);
+      this.hud.teleportButton.setVisible(false);
+      this.hud.spectatorButton.setVisible(false);
+      return;
+    }
+
+    if (this.selectedArrowType === 'teleport' && local.teleportArrows <= 0) this.selectedArrowType = 'normal';
+    this.hud.arrowCounter.count = local.arrows;
+    this.hud.inventory.setInventory({
+      arrows: local.arrows,
+      teleportArrows: local.teleportArrows,
+      hasShield: local.hasShield,
+      selectedArrowType: this.selectedArrowType,
+    });
+
+    const buttonsVisible = this.phase === 'playing' && this.matchState?.phase === 'playing';
+    this.hud.fletchButton.setVisible(buttonsVisible && local.alive && !local.spectating);
+    this.hud.fletchButton.setEnabled(local.alive && !local.spectating);
+    this.hud.fletchButton.setLabel(local.isFletching ? 'Cancel Fletch' : 'Fletch');
+    this.hud.teleportButton.setVisible(buttonsVisible && local.alive && !local.spectating);
+    this.hud.teleportButton.setEnabled(local.teleportArrows > 0);
+    this.hud.teleportButton.setLabel(this.selectedArrowType === 'teleport' ? 'Teleport Armed' : 'Teleport');
+    this.hud.spectatorButton.setVisible(local.spectating);
+
+    if (local.isFletching) {
+      this.hud.statusBanner.show('Fletching...');
+      this.swipeCamera.setForcedPitchOffset(-Math.PI / 6);
+    } else if (!local.spectating) {
+      this.hud.statusBanner.hide();
+      this.swipeCamera.setForcedPitchOffset(0);
+    }
+
+    if (!local.spectating) {
+      this.bowModel.setVisible(true);
+      this.swipeCamera.setEnabled(true);
+    } else {
+      this.bowModel.setVisible(false);
+      this.swipeCamera.setEnabled(false);
+    }
+  }
 
   private computeTrajectory(force: number): TrajectoryPoint[] {
     const pos = this.sceneManager.camera.position;
@@ -457,248 +709,310 @@ export class Game {
     );
   }
 
-  private fireArrow(force: number) {
-    if (!this.roundActive) return;
-    if (this.hud.arrowCounter.count <= 0) return;
-    this.hud.arrowCounter.count--;
-
+  private computePreviewTrajectory(force: number): TrajectoryPoint[] {
     const pos = this.sceneManager.camera.position;
     const dir = new THREE.Vector3();
     this.sceneManager.camera.getWorldDirection(dir);
-    const origin = { x: pos.x, y: pos.y, z: pos.z };
-    const direction = { x: dir.x, y: dir.y, z: dir.z };
+    return computeTrajectory(
+      { x: pos.x, y: pos.y, z: pos.z },
+      { x: dir.x, y: dir.y, z: dir.z },
+      forceToSpeed(force),
+      {
+        dt: 1 / 30,
+        maxTime: 3,
+        getTerrainHeight: (x, z) => sampleHeight(this.heightmap!, x, z),
+      },
+    );
+  }
 
+  private fireArrow(force: number) {
+    if (!this.heightmap) return;
+    if (this.phase === 'offline') {
+      this.fireOfflineArrow(force);
+      return;
+    }
+    if (!this.canAct()) return;
+    const local = this.getLocalPlayerState();
+    if (!local) return;
+
+    const direction = new THREE.Vector3();
+    this.sceneManager.camera.getWorldDirection(direction);
+    const arrowType = this.selectedArrowType === 'teleport' && local.teleportArrows > 0 ? 'teleport' : 'normal';
     const trajectory = this.computeTrajectory(force);
-
-    // Animate locally (optimistic)
     const arrow = new ArrowModel(this.sceneManager.scene, true);
+    this.activeArrows.push(arrow);
+
+    if (arrowType === 'teleport') {
+      this.pendingTeleportArrow = arrow;
+      this.pendingTeleportPos = null;
+    }
+
     arrow.launch(trajectory, (landPos) => {
       const cam = this.sceneManager.camera.position;
       this.audio.play('arrow-land', {
-        listenerX: cam.x, listenerZ: cam.z,
-        sourceX: landPos.x, sourceZ: landPos.z,
+        listenerX: cam.x,
+        listenerZ: cam.z,
+        sourceX: landPos.x,
+        sourceZ: landPos.z,
       });
+
+      // Apply deferred teleport when arrow lands
+      if (arrow === this.pendingTeleportArrow) {
+        const teleportTarget = this.pendingTeleportPos ?? { x: landPos.x, y: landPos.y, z: landPos.z };
+        this.snapLocalCamera(teleportTarget, false);
+        this.pendingTeleportArrow = null;
+        this.pendingTeleportPos = null;
+      }
+
+      setTimeout(() => this.disposeArrow(arrow), 150);
     });
+
+    if (arrowType === 'normal') this.hud.arrowCounter.count = Math.max(0, this.hud.arrowCounter.count - 1);
+    this.connection.send({
+      type: 'ARROW_FIRED',
+      direction: { x: direction.x, y: direction.y, z: direction.z },
+      force,
+      arrowType,
+    });
+    if (arrowType === 'teleport') this.selectedArrowType = 'normal';
+    this.resetDrawState();
+    this.bowModel.fireRecoil();
+  }
+
+  private fireOfflineArrow(force: number) {
+    if (!this.roundActive) return;
+    const arrowType = this.selectedArrowType === 'teleport' && this.offlineTeleportArrows > 0 ? 'teleport' : 'normal';
+    if (arrowType === 'normal' && this.offlineArrowCount <= 0) return;
+    if (arrowType === 'teleport' && this.offlineTeleportArrows <= 0) return;
+
+    if (arrowType === 'normal') {
+      this.offlineArrowCount--;
+    } else {
+      this.offlineTeleportArrows--;
+    }
+    this.hud.arrowCounter.count = this.offlineArrowCount;
+
+    const trajectory = this.computeTrajectory(force);
+    const arrow = new ArrowModel(this.sceneManager.scene, true);
     this.activeArrows.push(arrow);
 
-    // In offline mode, check hits locally
-    if (this.phase === 'offline') {
-      const players = [...this.playerMarkers.entries()]
-        .filter(([, m]) => m.mesh.visible)
-        .map(([id]) => ({ id, position: this.spawns[id] }));
+    if (arrowType === 'teleport') {
+      this.pendingTeleportArrow = arrow;
+      this.pendingTeleportPos = null;
+    }
 
+    arrow.launch(trajectory, (landPos) => {
+      // Apply offline teleport when arrow lands
+      if (arrow === this.pendingTeleportArrow) {
+        const clampedPos = this.clampToMapBounds(landPos.x, landPos.y, landPos.z);
+        this.snapLocalCamera(clampedPos, false);
+        this.pendingTeleportArrow = null;
+        this.pendingTeleportPos = null;
+      }
+    });
+
+    if (arrowType !== 'teleport') {
+      const players = this.offlineEnemyAlive ? [{ id: 'enemy', position: this.spawns.enemy }] : [];
       const hit = checkTrajectoryHits(trajectory, players, this.localPlayerId);
       if (hit) {
-        const marker = this.playerMarkers.get(hit.targetId);
-        if (marker) marker.mesh.visible = false;
+        this.offlineEnemyAlive = false;
+        this.playerMarkers.get('enemy')?.mesh.visible && (this.playerMarkers.get('enemy')!.mesh.visible = false);
         this.roundActive = false;
         this.round.end('hit');
         this.roundEndScreen.show('Hit!', 'Tap to play again', () => this.startOfflineRound());
       }
     }
 
-    // In networked mode, send to server
-    if (this.phase === 'playing') {
-      this.connection.send({
-        type: 'ARROW_FIRED',
-        origin,
-        direction,
-        force,
-      });
-    }
-
-    this.bowModel.setDrawForce(0);
-    this.trajectoryLine.hide();
-    this.isDrawing = false;
+    if (arrowType === 'teleport') this.selectedArrowType = 'normal';
+    this.resetDrawState();
+    this.bowModel.fireRecoil();
+    this.syncHudState();
   }
 
-  private animateRemoteArrow(msg: { origin: Vec3; direction: Vec3; force: number }) {
+  private animateRemoteArrow(origin: Vec3, direction: Vec3, force: number) {
     if (!this.heightmap) return;
-    const trajectory = computeTrajectory(
-      msg.origin, msg.direction, forceToSpeed(msg.force),
-      { getTerrainHeight: (x, z) => sampleHeight(this.heightmap!, x, z) },
-    );
+    const trajectory = computeTrajectory(origin, direction, forceToSpeed(force), {
+      getTerrainHeight: (x, z) => sampleHeight(this.heightmap!, x, z),
+    });
     const arrow = new ArrowModel(this.sceneManager.scene, false);
+    this.activeArrows.push(arrow);
     arrow.launch(trajectory, (landPos) => {
       const cam = this.sceneManager.camera.position;
       this.audio.play('arrow-land', {
-        listenerX: cam.x, listenerZ: cam.z,
-        sourceX: landPos.x, sourceZ: landPos.z,
+        listenerX: cam.x,
+        listenerZ: cam.z,
+        sourceX: landPos.x,
+        sourceZ: landPos.z,
       });
+      setTimeout(() => this.disposeArrow(arrow), 150);
     });
-    this.activeArrows.push(arrow);
   }
 
-  // --- Network Event Handlers ---
+  private disposeArrow(arrow: ArrowModel) {
+    arrow.dispose();
+    this.activeArrows = this.activeArrows.filter((entry) => entry !== arrow);
+  }
 
-  private handlePlayerHit(targetId: string) {
+  private resetDrawState() {
+    this.isDrawing = false;
+    this.bowModel.setDrawForce(0);
+    this.hud.crosshair.setDrawForce(0);
+    this.trajectoryLine.hide();
+  }
+
+  private handlePlayerHit(targetId: string, blockedByShield: boolean) {
     const marker = this.playerMarkers.get(targetId);
-    if (marker) marker.mesh.visible = false;
-
+    if (marker) {
+      marker.flashHit();
+      if (!blockedByShield) setTimeout(() => { marker.mesh.visible = false; }, 300);
+    }
     if (targetId === this.localPlayerId) {
-      // We got hit
-      this.roundActive = false;
+      if (blockedByShield) {
+        this.hud.statusBanner.show('Shield absorbed the hit');
+        setTimeout(() => this.hud.statusBanner.hide(), 1200);
+      } else {
+        this.hud.statusBanner.show('You were hit');
+      }
     }
   }
 
   private handleRoundEnd(winnerId: string | null, scores: Record<string, number>) {
     this.roundActive = false;
-    this.round.end('none');
-
-    const winnerName = winnerId
-      ? this.lobbyPlayers.find((p) => p.id === winnerId)?.displayName || 'Unknown'
-      : null;
-    const title = winnerId === this.localPlayerId
-      ? 'Round Won!'
-      : winnerId
-        ? `${winnerName} wins!`
-        : 'Draw!';
+    const winnerName = winnerId ? this.lobbyPlayers.find((player) => player.id === winnerId)?.displayName || winnerId : null;
+    const title = winnerId === this.localPlayerId ? 'Round Won!' : winnerId ? `${winnerName} wins!` : 'Draw!';
     const scoreText = Object.entries(scores)
-      .map(([id, s]) => `${this.lobbyPlayers.find((p) => p.id === id)?.displayName || id}: ${s}`)
+      .map(([id, score]) => `${this.lobbyPlayers.find((player) => player.id === id)?.displayName || id}: ${score}`)
       .join('  |  ');
-
     this.roundEndScreen.show(title, scoreText);
-    // Round end screen auto-dismissed when server sends ROUND_START
   }
 
   private handleMatchOver(winnerId: string, scores: Record<string, number>) {
     this.roundActive = false;
-    this.round.end('none');
-
-    const winnerName = this.lobbyPlayers.find((p) => p.id === winnerId)?.displayName || 'Unknown';
+    const winnerName = this.lobbyPlayers.find((player) => player.id === winnerId)?.displayName || winnerId;
     const title = winnerId === this.localPlayerId ? 'You Win the Match!' : `${winnerName} wins!`;
     const scoreText = Object.entries(scores)
-      .map(([id, s]) => `${this.lobbyPlayers.find((p) => p.id === id)?.displayName || id}: ${s}`)
+      .map(([id, score]) => `${this.lobbyPlayers.find((player) => player.id === id)?.displayName || id}: ${score}`)
       .join('  |  ');
-
-    this.roundEndScreen.show(title, scoreText, () => {
-      this.showMenu();
-    });
+    if (this.isHost) {
+      this.roundEndScreen.show(title, scoreText, undefined, [
+        { label: 'Rematch', onPress: () => this.connection.send({ type: 'START_MATCH' }) },
+        { label: 'New Map', onPress: () => this.connection.send({ type: 'START_NEW_MAP' }) },
+      ]);
+    } else {
+      this.roundEndScreen.show(title, `${scoreText}  |  Waiting for host...`);
+    }
   }
 
-  // --- Offline / Single-Player ---
-
-  /** Start an offline single-player practice round. */
   async startOffline() {
     this.phase = 'offline';
     this.menuScreen.hide();
     this.lobbyScreen.hide();
-    this.loadingScreen.show();
-    await new Promise(r => setTimeout(r, 0)); // yield so loading screen renders
-
-    this.seed = Math.floor(Math.random() * 2147483647);
-    this.heightmap = generateHeightmap(this.seed, TERRAIN_BASE);
-
-    this.clearWorld();
-    const terrain = createTerrainMesh(this.heightmap);
-    this.sceneManager.scene.add(terrain);
-    this.terrainObjects.push(terrain);
-    const sky = createSky();
-    this.sceneManager.scene.add(sky);
-    this.terrainObjects.push(sky);
-    const obs = placeObstacles(this.seed, this.heightmap, TERRAIN_BASE);
-    this.sceneManager.scene.add(obs);
-    this.terrainObjects.push(obs);
-
-    const spawnPts = generateSpawnPoints(this.seed, this.heightmap, 2);
+    const generated = generateWorldLayout(Math.floor(Math.random() * 2147483647), 2);
+    await this.initGameWorld(generated.layout);
     this.localPlayerId = 'local';
-    this.spawns = { local: spawnPts[0], enemy: spawnPts[1] };
-
-    this.sceneManager.camera.position.set(
-      spawnPts[0].x,
-      spawnPts[0].y + SPAWN.PLAYER_EYE_HEIGHT,
-      spawnPts[0].z,
-    );
-
+    this.spawns = { local: cloneVec3(generated.layout.spawns[0]), enemy: cloneVec3(generated.layout.spawns[1]) };
     const marker = new PlayerMarker(this.sceneManager.scene, 'enemy', 0);
-    marker.setPosition(spawnPts[1].x, spawnPts[1].y, spawnPts[1].z);
+    marker.setPosition(this.spawns.enemy.x, this.spawns.enemy.y, this.spawns.enemy.z);
     this.playerMarkers.set('enemy', marker);
-
-    this.loadingScreen.hide();
-    this.hudMenuBtn.style.display = 'block';
+    this.snapLocalCamera(this.spawns.local, true);
     this.startOfflineRound();
+        this.syncHudState();
   }
 
   private startOfflineRound() {
+    this.offlineEnemyAlive = true;
+    this.offlineArrowCount = PACING.STARTING_ARROWS;
+    this.offlineTeleportArrows = PACING.TELEPORT_ARROWS_PER_ROUND;
+    this.offlineHasShield = false;
+    this.selectedArrowType = 'normal';
     this.roundActive = true;
-    this.hud.arrowCounter.count = PACING.STARTING_ARROWS;
-
-    for (const [, marker] of this.playerMarkers) marker.mesh.visible = true;
-    for (const a of this.activeArrows) a.dispose();
-    this.activeArrows = [];
-
-    this.bowModel.setDrawForce(0);
-    this.trajectoryLine.hide();
-    this.isDrawing = false;
-
-    const mySpawn = this.spawns[this.localPlayerId];
-    if (mySpawn) {
-      this.sceneManager.camera.position.set(
-        mySpawn.x,
-        mySpawn.y + SPAWN.PLAYER_EYE_HEIGHT,
-        mySpawn.z,
-      );
-    }
-
+    this.playerMarkers.get('enemy')?.mesh && (this.playerMarkers.get('enemy')!.mesh.visible = true);
+    this.snapLocalCamera(this.spawns.local, true);
+    this.clearRenderedArrows();
+    this.resetDrawState();
     this.round.start(PACING.BASE_ROUND_TIME);
     this.hud.timer.start(PACING.BASE_ROUND_TIME);
+    this.syncHudState();
   }
 
-  // --- HUD Menu Button ---
-
-  private setupHUDMenuButton() {
-    this.hudMenuBtn = document.createElement('button');
-    this.hudMenuBtn.textContent = '≡';
-    Object.assign(this.hudMenuBtn.style, {
-      position: 'absolute',
-      top: '12px',
-      right: '12px',
-      width: '44px',
-      height: '44px',
-      fontSize: '22px',
-      fontWeight: 'bold',
-      background: 'rgba(0,0,0,0.4)',
-      color: '#fff',
-      border: '1px solid rgba(255,255,255,0.3)',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      zIndex: '150',
-      display: 'none',
-      pointerEvents: 'auto',
-      touchAction: 'none',
-    });
-    this.hudMenuBtn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.showMenu();
-    });
-    this.hud.element.appendChild(this.hudMenuBtn);
+  private updateSpectatorCamera() {
+    const local = this.getLocalPlayerState();
+    if (!local?.spectating || !this.matchState) return;
+    const targetId = this.spectatorTargetId ?? this.matchState.players.find((player) => player.alive && player.id !== local.id)?.id;
+    if (!targetId) return;
+    const target = this.matchState.players.find((player) => player.id === targetId);
+    if (!target) return;
+    const view = this.remoteViews.get(targetId) ?? { yaw: target.viewYaw, pitch: target.viewPitch };
+    this.sceneManager.camera.position.set(target.position.x, target.position.y + SPAWN.PLAYER_EYE_HEIGHT, target.position.z);
+    this.swipeCamera.setLook(view.yaw, view.pitch);
+    this.hud.statusBanner.show(`Spectating ${target.displayName}`);
   }
 
-  // --- Menu ---
+  private cycleSpectatorTarget() {
+    if (!this.matchState) return;
+    const candidates = this.matchState.players.filter((player) => player.alive && player.id !== this.localPlayerId);
+    if (candidates.length === 0) return;
+    const currentIndex = candidates.findIndex((player) => player.id === this.spectatorTargetId);
+    this.spectatorTargetId = candidates[(currentIndex + 1 + candidates.length) % candidates.length].id;
+  }
+
+  private clampToMapBounds(x: number, y: number, z: number): Vec3 {
+    if (!this.world || !this.heightmap) return { x, y, z };
+    const half = this.world.terrain.mapSize / 2;
+    const buffer = 5;
+    const cx = Math.max(-half + buffer, Math.min(half - buffer, x));
+    const cz = Math.max(-half + buffer, Math.min(half - buffer, z));
+    const cy = sampleHeight(this.heightmap, cx, cz);
+    return { x: cx, y: cy, z: cz };
+  }
 
   showMenu() {
-    if (this.phase === 'offline' || this.phase === 'playing') {
-      if (this.roundActive) {
-        this.roundActive = false;
-        this.round.end('none');
-      }
-      this.roundEndScreen.hide();
-      this.clearWorld();
-      this.connection.disconnect();
-      this.lobbyPlayers = [];
-    }
-    this.phase = 'menu';
-    this.hudMenuBtn.style.display = 'none';
-    this.lobbyScreen.hide();
+    this.stopMatchStateRetry();
+    this.roundActive = false;
+    this.matchState = null;
+    this.world = null;
+    this.worldKey = null;
+    this.worldInitKey = null;
+    this.worldInitPromise = null;
+    this.heightmap = null;
+    this.currentZone = null;
+    this.connection.disconnect();
+    this.clearWorld();
     this.menuScreen.show();
+    this.lobbyScreen.hide();
+    this.roundEndScreen.hide();
+        this.phase = 'menu';
+    this.selectedArrowType = 'normal';
+    this.hud.fletchButton.setVisible(false);
+    this.hud.teleportButton.setVisible(false);
+    this.hud.spectatorButton.setVisible(false);
+    this.hud.statusBanner.hide();
+    this.hud.zoneBanner.hide();
+  }
+
+  private startMatchStateRetry() {
+    this.stopMatchStateRetry();
+    let attempts = 0;
+    this.matchStateRetryId = window.setInterval(() => {
+      attempts++;
+      if (this.worldKey || this.phase !== 'playing' || !this.connection.connected || attempts > 10) {
+        this.stopMatchStateRetry();
+        return;
+      }
+      this.connection.send({ type: 'REQUEST_MATCH_STATE' });
+    }, 1000);
+  }
+
+  private stopMatchStateRetry() {
+    if (this.matchStateRetryId !== null) {
+      clearInterval(this.matchStateRetryId);
+      this.matchStateRetryId = null;
+    }
   }
 
   private generateRoomCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
-    }
+    for (let i = 0; i < 6; i++) code += Math.floor(Math.random() * 10).toString();
     return code;
   }
 }

@@ -1,21 +1,58 @@
-import type { RoomState } from './Room';
+import { PACING } from '@bojo-dojo/common';
+import type { ZoneState } from '@bojo-dojo/common';
+import type { PlayerInfo, RoomState } from './Room';
 
-/**
- * GameLoop — manages round timer on the server.
- * Sends TIMER_SYNC periodically and triggers round end on timeout.
- */
 export class GameLoop {
   private tickInterval: ReturnType<typeof setInterval> | null = null;
-  private syncCounter = 0;
 
   constructor(
     private room: RoomState,
-    private broadcast: (msg: object) => void,
+    private callbacks: {
+      broadcast: (msg: object) => void;
+      broadcastState: () => void;
+      onRoundResolved: (winnerId: string | null) => void;
+    },
   ) {}
 
-  /** Start the round timer. */
+  private getRoundDurationSeconds() {
+    return PACING.BASE_ROUND_TIME + Math.max(0, this.room.players.size - 2) * PACING.TIME_PER_EXTRA_PLAYER;
+  }
+
+  private computeZoneState(): ZoneState | null {
+    if (!this.room.zone || !this.room.world) return null;
+
+    const totalSeconds = this.getRoundDurationSeconds();
+    const elapsedFraction = 1 - this.room.roundTimeRemaining / totalSeconds;
+    const activation = this.room.world.zone.activationElapsedFraction;
+    const active = elapsedFraction >= activation;
+    if (!active) {
+      return {
+        ...this.room.zone,
+        active: false,
+        currentRadius: this.room.world.zone.initialRadius,
+      };
+    }
+
+    const progress = Math.min(1, (elapsedFraction - activation) / Math.max(0.001, 1 - activation));
+    const currentRadius = this.room.world.zone.initialRadius
+      + (this.room.world.zone.finalRadius - this.room.world.zone.initialRadius) * progress;
+
+    return {
+      ...this.room.zone,
+      active: true,
+      currentRadius,
+    };
+  }
+
+  private resolveIfRoundEnded(winnerId: string | null): boolean {
+    if (winnerId === undefined) return false;
+    this.stop();
+    this.callbacks.onRoundResolved(winnerId);
+    return true;
+  }
+
   start() {
-    this.syncCounter = 0;
+    this.stop();
 
     this.tickInterval = setInterval(() => {
       if (this.room.phase !== 'playing') {
@@ -23,52 +60,52 @@ export class GameLoop {
         return;
       }
 
-      this.room.roundTimeRemaining--;
-      this.syncCounter++;
+      const now = Date.now();
+      const stateDirty = { value: false };
 
-      // Send TIMER_SYNC every 10 seconds
-      if (this.syncCounter % 10 === 0) {
-        this.broadcast({
-          type: 'TIMER_SYNC',
-          remainingSeconds: this.room.roundTimeRemaining,
+      const finishedFletches = this.room.completeDueFletches(now);
+      for (const player of finishedFletches) {
+        this.callbacks.broadcast({
+          type: 'FLETCH_COMPLETE',
+          playerId: player.id,
+          arrows: player.arrows,
         });
+        stateDirty.value = true;
       }
 
-      // Round time expired
-      if (this.room.roundTimeRemaining <= 0) {
-        this.stop();
-        // Time up — draw (no winner)
-        const matchOver = this.room.endRound(null);
-        this.broadcast({
-          type: 'ROUND_END',
-          winnerId: null,
-          scores: { ...this.room.scores },
-        });
-
-        if (matchOver) {
-          this.broadcast({
-            type: 'MATCH_OVER',
-            winnerId: null,
-            scores: { ...this.room.scores },
-          });
-        } else {
-          // Auto-start next round after delay
-          setTimeout(() => {
-            if (this.room.players.size >= 2) {
-              this.room.startRound();
-              this.broadcast({
-                type: 'ROUND_START',
-                roundNumber: this.room.currentRound,
-              });
-              this.start();
-            }
-          }, 3000);
+      const disconnectedDeaths = this.room.forceKillDisconnected(now);
+      for (const playerId of disconnectedDeaths) {
+        const winnerId = this.room.killPlayerImmediately(playerId);
+        stateDirty.value = true;
+        if (winnerId !== null) {
+          this.callbacks.broadcastState();
+          this.resolveIfRoundEnded(winnerId);
+          return;
         }
+      }
+
+      this.room.roundTimeRemaining = Math.max(0, this.room.roundTimeRemaining - 1);
+      this.callbacks.broadcast({
+        type: 'TIMER_SYNC',
+        remainingSeconds: this.room.roundTimeRemaining,
+      });
+
+      // Zone ring closing mechanic disabled for now
+      // const zone = this.computeZoneState();
+      // if (zone) { ... }
+
+      if (this.room.roundTimeRemaining <= 0) {
+        this.callbacks.broadcastState();
+        this.resolveIfRoundEnded(null);
+        return;
+      }
+
+      if (stateDirty.value) {
+        this.callbacks.broadcastState();
       }
     }, 1000);
   }
 
-  /** Stop the timer. */
   stop() {
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
