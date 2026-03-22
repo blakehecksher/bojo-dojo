@@ -139,16 +139,19 @@ export class Game {
     const roomFromUrl = new URLSearchParams(window.location.search).get('room');
     const savedSession = sessionStorage.getItem('bojo-session');
 
-    if (savedSession) {
-      // Auto-rejoin after page reload (e.g. returning from share sheet)
+    // Only auto-rejoin if there's a ?room= param (returning from share sheet).
+    // Plain refresh should show the menu fresh.
+    if (savedSession && roomFromUrl) {
       try {
         const session = JSON.parse(savedSession) as { roomCode: string; name: string; colorIndex: number };
         this.joinRoom(session.roomCode, session.name, session.colorIndex);
       } catch {
+        sessionStorage.removeItem('bojo-session');
         this.showMenu();
-        if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
+        this.menuScreen.setJoinCode(roomFromUrl);
       }
     } else {
+      sessionStorage.removeItem('bojo-session');
       this.showMenu();
       if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
     }
