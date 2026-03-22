@@ -355,9 +355,39 @@ export class RoomState {
   private clampToMapBounds(position: Vec3): Vec3 {
     if (!this.world || !this.heightmap) return { ...position };
     const half = this.world.terrain.mapSize / 2;
-    const buffer = 5;
-    const x = Math.max(-half + buffer, Math.min(half - buffer, position.x));
-    const z = Math.max(-half + buffer, Math.min(half - buffer, position.z));
+    const buffer = 20;
+    let x = Math.max(-half + buffer, Math.min(half - buffer, position.x));
+    let z = Math.max(-half + buffer, Math.min(half - buffer, position.z));
+
+    // Nudge out of valleys: if surrounding terrain is higher on average,
+    // shift toward the highest neighboring sample to avoid getting stuck.
+    const step = 6;
+    const samples = [
+      { dx: step, dz: 0 }, { dx: -step, dz: 0 },
+      { dx: 0, dz: step }, { dx: 0, dz: -step },
+    ];
+    const centerY = sampleHeight(this.heightmap, x, z);
+    let bestY = centerY;
+    let bestDx = 0;
+    let bestDz = 0;
+    for (const s of samples) {
+      const sx = Math.max(-half + buffer, Math.min(half - buffer, x + s.dx));
+      const sz = Math.max(-half + buffer, Math.min(half - buffer, z + s.dz));
+      const sy = sampleHeight(this.heightmap, sx, sz);
+      if (sy > bestY) {
+        bestY = sy;
+        bestDx = s.dx;
+        bestDz = s.dz;
+      }
+    }
+    // If we're significantly lower than a neighbor, nudge halfway toward it
+    if (bestY - centerY > 2) {
+      x += bestDx * 0.5;
+      z += bestDz * 0.5;
+      x = Math.max(-half + buffer, Math.min(half - buffer, x));
+      z = Math.max(-half + buffer, Math.min(half - buffer, z));
+    }
+
     const y = sampleHeight(this.heightmap, x, z);
     return { x, y, z };
   }

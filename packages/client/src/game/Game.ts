@@ -308,7 +308,7 @@ export class Game {
           this.phase = 'playing';
           this.menuScreen.hide();
           this.lobbyScreen.hide();
-                    this.roundEndScreen.hide();
+          this.roundEndScreen.hide();
           this.roundActive = true;
           this.resetDrawState();
           this.clearRenderedArrows();
@@ -490,11 +490,11 @@ export class Game {
       this.lobbyScreen.setIsHost(this.isHost);
       this.menuScreen.hide();
       this.lobbyScreen.show();
-          } else {
+    } else {
       this.phase = 'playing';
       this.menuScreen.hide();
       this.lobbyScreen.hide();
-          }
+    }
 
     const local = this.getLocalPlayerState();
     if (local) {
@@ -684,6 +684,7 @@ export class Game {
       this.hud.spectatorButton.setVisible(false);
       this.hud.zoneBanner.hide();
       this.hud.statusBanner.hide();
+      this.hud.playerCount.hide();
       this.bowModel.setVisible(true);
       this.swipeCamera.setEnabled(true);
       this.swipeCamera.setForcedPitchOffset(0);
@@ -694,7 +695,17 @@ export class Game {
       this.hud.fletchButton.setVisible(false);
       this.hud.teleportButton.setVisible(false);
       this.hud.spectatorButton.setVisible(false);
+      this.hud.playerCount.hide();
       return;
+    }
+
+    // Update player count indicator
+    if (this.matchState) {
+      const connected = this.matchState.players.length;
+      const alive = this.matchState.players.filter((p) => p.alive).length;
+      const isPlaying = this.matchState.phase === 'playing';
+      this.hud.playerCount.update(connected, alive, isPlaying);
+      this.hud.playerCount.show();
     }
 
     if (this.selectedArrowType === 'teleport' && local.teleportArrows <= 0) this.selectedArrowType = 'normal';
@@ -951,7 +962,7 @@ export class Game {
     this.playerMarkers.set('enemy', marker);
     this.snapLocalCamera(this.spawns.local, true);
     this.startOfflineRound();
-        this.syncHudState();
+    this.syncHudState();
   }
 
   private startOfflineRound() {
@@ -1017,13 +1028,14 @@ export class Game {
     this.menuScreen.show();
     this.lobbyScreen.hide();
     this.roundEndScreen.hide();
-        this.phase = 'menu';
+    this.phase = 'menu';
     this.selectedArrowType = 'normal';
     this.hud.fletchButton.setVisible(false);
     this.hud.teleportButton.setVisible(false);
     this.hud.spectatorButton.setVisible(false);
     this.hud.statusBanner.hide();
     this.hud.zoneBanner.hide();
+    this.hud.playerCount.hide();
   }
 
   private startMatchStateRetry() {

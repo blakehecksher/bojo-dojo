@@ -74,12 +74,12 @@ export class GameLoop {
       }
 
       const disconnectedDeaths = this.room.forceKillDisconnected(now);
-      for (const playerId of disconnectedDeaths) {
-        const winnerId = this.room.killPlayerImmediately(playerId);
+      if (disconnectedDeaths.length > 0) {
         stateDirty.value = true;
-        if (winnerId !== null) {
+        const alive = this.room.getAlivePlayers();
+        if (alive.length <= 1) {
           this.callbacks.broadcastState();
-          this.resolveIfRoundEnded(winnerId);
+          this.resolveIfRoundEnded(alive[0]?.id ?? null);
           return;
         }
       }

@@ -128,10 +128,7 @@ export default class BojoDojo implements Party.Server {
     if (this.room.phase === 'playing') return;
 
     if (this.room.phase === 'lobby') {
-      this.room.initMatch(true);
-      if (forceNewWorld) {
-        this.room.initMatch(true);
-      }
+      this.room.initMatch(forceNewWorld);
       this.room.startRound();
     } else if (this.room.phase === 'match_over') {
       this.room.startRematch(!forceNewWorld);
@@ -235,18 +232,29 @@ export default class BojoDojo implements Party.Server {
       }
 
       if (arrowType === 'teleport') {
-        const teleported = this.room.teleportPlayer(player.id, landingPosition);
-        if (teleported) {
-          this.broadcastJson({
-            type: 'PLAYER_TELEPORT',
-            playerId: teleported.id,
-            position: teleported.position,
-            remainingTeleports: teleported.teleportArrows,
-          });
+        // Don't teleport dead players
+        const teleporter = this.room.getPlayer(player.id);
+        if (teleporter?.alive) {
+          const teleported = this.room.teleportPlayer(player.id, landingPosition);
+          if (teleported) {
+            this.broadcastJson({
+              type: 'PLAYER_TELEPORT',
+              playerId: teleported.id,
+              position: teleported.position,
+              remainingTeleports: teleported.teleportArrows,
+            });
+          }
         }
       }
 
       if (playerHit) {
+        // Don't apply hits from dead players — their arrows are visual-only after death
+        const shooter = this.room.getPlayer(player.id);
+        if (!shooter || !shooter.alive) {
+          this.broadcastMatchState();
+          return;
+        }
+
         const result = this.room.absorbOrKillPlayer(playerHit.targetId);
         this.broadcastJson({
           type: 'PLAYER_HIT',
