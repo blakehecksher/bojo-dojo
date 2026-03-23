@@ -246,7 +246,7 @@ export class MenuScreen {
     const backWrap = document.createElement('div');
     Object.assign(backWrap.style, {
       position: 'absolute',
-      bottom: '130px',
+      top: '16px',
       left: '0',
       width: '100%',
       display: 'none',
@@ -349,6 +349,10 @@ export class MenuScreen {
     setTimeout(() => {
       this.overlay.style.display = 'none';
     }, 300);
+  }
+
+  isHidden() {
+    return this.overlay.style.display === 'none';
   }
 
   showBackButton() {

@@ -14,7 +14,7 @@ export class ShowcaseScoreboard {
       display: 'none',
       flexDirection: 'column',
       gap: '4px',
-      zIndex: '250',
+      zIndex: '150',
       pointerEvents: 'none',
     });
     parent.appendChild(this.el);

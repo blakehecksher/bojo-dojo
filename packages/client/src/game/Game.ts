@@ -282,8 +282,10 @@ export class Game {
         this.menuScreen.hide();
         this.menuScreen.showBackButton();
         this.showcaseMode = true;
+        this.hud.statusBanner.element.style.bottom = '24px';
         this.hud.statusBanner.show('Spectating Bot Match');
         this.swipeCamera.setEnabled(true);
+        this.thumbstick.setVisible(true);
         // Hide gameplay UI
         this.bowModel.setVisible(false);
         this.pullSlider.setVisible(false);
@@ -295,8 +297,10 @@ export class Game {
       },
       onBackToMenu: () => {
         this.showcaseMode = false;
+        this.hud.statusBanner.element.style.bottom = '84px';
         this.hud.statusBanner.hide();
         this.hud.minimap.hide();
+        this.hud.showcaseScoreboard.hide();
         this.menuScreen.hideBackButton();
         this.menuScreen.show();
       },
@@ -746,6 +750,7 @@ export class Game {
       this.hud.playerCount.hide();
       this.hud.shieldGlow.setActive(this.offlineHasShield);
       this.bowModel.setVisible(true);
+      this.thumbstick.setVisible(true);
       this.swipeCamera.setEnabled(true);
       this.swipeCamera.setForcedPitchOffset(0);
       if (this.roundActive) {
@@ -796,6 +801,7 @@ export class Game {
       if (Date.now() >= this.hintUntil) this.hud.statusBanner.hide();
       this.swipeCamera.setForcedPitchOffset(0);
       this.bowModel.setVisible(true);
+      this.thumbstick.setVisible(true);
       this.pullSlider.setVisible(true);
       this.swipeCamera.setEnabled(true);
     } else {
@@ -1172,14 +1178,16 @@ export class Game {
       this.syncLandedArrows(state.landedArrows);
     }
 
-    // Update minimap and scoreboard for showcase
-    if (this.heightmap && this.showcaseMode) {
+    // Update minimap and scoreboard for showcase (only when menu is hidden)
+    if (this.heightmap && this.showcaseMode && this.menuScreen.isHidden()) {
       const angles = this.swipeCamera.getAngles();
       this.hud.minimap.update('', state.players, angles.yaw, true);
       this.hud.minimap.show();
     }
     this.hud.showcaseScoreboard.update(state.scores, state.players);
-    this.hud.showcaseScoreboard.show();
+    if (this.showcaseMode && this.menuScreen.isHidden()) {
+      this.hud.showcaseScoreboard.show();
+    }
   }
 
   /**
@@ -1233,6 +1241,12 @@ export class Game {
     this.hud.playerCount.hide();
     this.hud.minimap.hide();
     this.hud.shieldGlow.setActive(false);
+    this.hud.crosshair.hide();
+    this.hud.inventory.hide();
+    this.hud.timer.hide();
+    this.bowModel.setVisible(false);
+    this.thumbstick.setVisible(false);
+    this.pullSlider.setVisible(false);
   }
 
   private startMatchStateRetry() {

@@ -2,28 +2,32 @@
 _Last updated: 2026-03-23_
 
 ## Current focus
-Playtest polish complete. Game is stable with minimap, spectator mode, and corrected bow mechanics. Ready for AI bot players.
+AI bot players implemented. Showcase attract mode plays behind the menu screen. Spectate button lets users watch fullscreen. UI cleanup in progress for menu/spectate transitions.
 
 ## What's working
 - Multiplayer: create/join rooms, share links, auto-rejoin, disconnect grace period (10s)
+- AI bots: server-side BotBrain with LOS targeting, inverse ballistics solver, aim spread, teleport repositioning
+- Showcase room: lazy bot match (6 bots) runs only when spectators connected, auto-restarts rounds/matches
+- Client attract mode: bot match renders behind frosted-glass menu, Spectate button for fullscreen orbital view
+- Showcase scoreboard: color dots with round wins, visible only during spectate
+- Teleport arrows now hit/kill players they pass through
+- Player limit raised from 4 to 6
 - Minimap with topographic contour lines, player position, arrow trails, debug mode (F3)
 - Spectator mode with bird's-eye orbit camera after elimination
 - Bow model with correct draw animation (limbs bend toward player on draw)
-- Shield glow overlay, unlimited ammo (no inventory/fletch UI)
-- Deferred arrow hit timing (server + offline) — hits register at trajectory intersection, not on landing
-- Round-boundary guards prevent stale arrows affecting new rounds
+- Shield glow overlay, unlimited ammo
+- Deferred arrow hit timing — hits register at trajectory intersection, not on landing
 - Lobby UX: how-to-play tips, name/color/code labels, share link
-- Terrain generation without edge falloff
-- Offline practice mode with deferred hit timing
+- Offline practice mode
 - Builds and type-checks cleanly
 
 ## In progress
-Nothing — clean state, ready for next feature.
+- Menu/spectate UI polish: hiding gameplay elements (bow, thumbstick, minimap) when on menu screen
 
 ## Known issues
 - Playwright is too heavy on this machine — use `tsc --noEmit` and `pnpm build` for verification
 - Build emits a >500 kB client chunk warning
-- Teleport arrow toggle button visible but teleport pickup spawns are disabled (teleport arrows still work via toggle)
+- Vite HMR doesn't always cleanly swap modules — hard refresh sometimes needed
 
 ## Deployment workflow
 **IMPORTANT:** The client `.env` points to a deployed PartyKit server (`bojo-dojo.blakehecksher.partykit.dev`). After ANY change to server or common packages, you MUST redeploy:
@@ -32,24 +36,20 @@ Nothing — clean state, ready for next feature.
 pnpm --filter @bojo-dojo/server exec partykit deploy
 ```
 
-Without this, the deployed server runs stale code and the client/server protocols will mismatch.
-
-To use a local server instead, comment out `VITE_PARTYKIT_HOST` in `packages/client/.env` and run `pnpm dev:server` alongside `pnpm dev`.
+Client is tested locally with `pnpm dev` (vite). Do not deploy client unless explicitly asked.
 
 ## Next actions
-1. AI bot players — server-side virtual players that navigate, aim, and fire using existing trajectory system
-2. Host can add 1-3 bots from lobby
-3. Bot-only spectator matches
+1. Verify menu/spectate UI cleanup on phone (thumbstick, bow, minimap hidden on menu)
+2. Consider bot difficulty settings or behavior variety
+3. Polish: bot name labels visible in spectate, kill feed
 
 ## How to verify
-1. `pnpm build`
+1. `pnpm --filter @bojo-dojo/client exec tsc --noEmit`
 2. `pnpm --filter @bojo-dojo/server exec tsc --noEmit`
-3. `pnpm --filter @bojo-dojo/common exec tsc --noEmit`
-4. `pnpm --filter @bojo-dojo/server exec partykit deploy` (if server/common changed)
-5. Manual: open on phone, create game, join with second device, confirm terrain loads and gameplay works
+3. `pnpm --filter @bojo-dojo/server exec partykit deploy` (if server/common changed)
+4. `pnpm dev` — open on phone, verify bot match behind menu, spectate mode works, no stray UI elements
 
 ## Recent logs
-- docs/log/2026-03-23 Playtest Polish and Bow Fix.md — Minimap, spectator mode, bow fix, deferred hit timing, UI/UX polish, unlimited ammo
+- docs/log/2026-03-23 AI Bot Players.md — Bot AI, showcase attract mode, spectate view, teleport kill fix, 6-player support
+- docs/log/2026-03-23 Playtest Polish and Bow Fix.md — Minimap, spectator mode, bow fix, deferred hit timing, UI/UX polish
 - docs/log/2026-03-17 Debug Terrain Loading.md — Diagnosed terrain failure as stale deployed server, fixed worldKey race condition
-- docs/log/2026-03-16 2120 Pause After Terrain Failure.md
-- docs/log/2026-03-16 2116 Terrain Visibility Fallback.md

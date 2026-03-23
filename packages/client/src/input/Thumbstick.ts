@@ -149,6 +149,10 @@ export class Thumbstick implements InputHandler {
     this.knob.style.transform = `translate(calc(-50% + ${visualX}px), calc(-50% + ${visualY}px))`;
   }
 
+  setVisible(visible: boolean) {
+    this.container.style.display = visible ? '' : 'none';
+  }
+
   dispose() {
     window.removeEventListener('resize', this.updateZone);
     this.container.remove();
