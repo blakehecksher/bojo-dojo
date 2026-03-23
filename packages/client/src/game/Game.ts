@@ -107,6 +107,7 @@ export class Game {
   private matchStateRetryId: number | null = null;
   private pendingTeleportArrow: ArrowModel | null = null;
   private pendingTeleportPos: Vec3 | null = null;
+  private hintUntil = 0;
 
   constructor() {
     this.sceneManager = new SceneManager();
@@ -139,16 +140,19 @@ export class Game {
     const roomFromUrl = new URLSearchParams(window.location.search).get('room');
     const savedSession = sessionStorage.getItem('bojo-session');
 
-    if (savedSession) {
-      // Auto-rejoin after page reload (e.g. returning from share sheet)
+    // Only auto-rejoin if there's a ?room= param (returning from share sheet).
+    // Plain refresh should show the menu fresh.
+    if (savedSession && roomFromUrl) {
       try {
         const session = JSON.parse(savedSession) as { roomCode: string; name: string; colorIndex: number };
         this.joinRoom(session.roomCode, session.name, session.colorIndex);
       } catch {
+        sessionStorage.removeItem('bojo-session');
         this.showMenu();
-        if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
+        this.menuScreen.setJoinCode(roomFromUrl);
       }
     } else {
+      sessionStorage.removeItem('bojo-session');
       this.showMenu();
       if (roomFromUrl) this.menuScreen.setJoinCode(roomFromUrl);
     }
@@ -308,11 +312,19 @@ export class Game {
           this.phase = 'playing';
           this.menuScreen.hide();
           this.lobbyScreen.hide();
-                    this.roundEndScreen.hide();
+          this.roundEndScreen.hide();
           this.roundActive = true;
           this.resetDrawState();
           this.clearRenderedArrows();
           this.startMatchStateRetry();
+          if (msg.roundNumber === 1) {
+            this.hud.statusBanner.show('Swipe to aim \u2022 Pull right slider to fire');
+            this.hintUntil = Date.now() + 4000;
+            setTimeout(() => {
+              this.hintUntil = 0;
+              this.hud.statusBanner.hide();
+            }, 4000);
+          }
           break;
         case 'ARROW_FIRED':
           this.animateRemoteArrow(msg.origin, msg.direction, msg.force);
@@ -443,6 +455,18 @@ export class Game {
       this.bowModel.update(dt);
       for (const marker of this.playerMarkers.values()) marker.update(dt);
       this.pickupMarkers.update(dt);
+
+      // Smooth minimap tracking from camera position
+      if (this.heightmap && (this.phase === 'playing' || this.phase === 'offline')) {
+        const cam = this.sceneManager.camera.position;
+        const angles = this.swipeCamera.getAngles();
+        if (this.matchState?.players && this.phase === 'playing') {
+          const spectating = this.isSpectating();
+          this.hud.minimap.update(this.localPlayerId, this.matchState.players, angles.yaw, spectating);
+        } else if (this.phase === 'offline') {
+          this.hud.minimap.updateLocal(cam.x, cam.z, 0, angles.yaw);
+        }
+      }
     });
   }
 
@@ -464,6 +488,7 @@ export class Game {
     this.lobbyPlayers = state.players.map((player) => ({ id: player.id, displayName: player.displayName }));
     this.lobbyScreen.setPlayers(this.lobbyPlayers);
     this.hud.timer.sync(state.roundTimeRemaining);
+    this.hud.playerCount.setRoomCode(state.roomCode);
     this.roundActive = state.phase === 'playing';
 
     if (state.world) {
@@ -490,11 +515,11 @@ export class Game {
       this.lobbyScreen.setIsHost(this.isHost);
       this.menuScreen.hide();
       this.lobbyScreen.show();
-          } else {
+    } else {
       this.phase = 'playing';
       this.menuScreen.hide();
       this.lobbyScreen.hide();
-          }
+    }
 
     const local = this.getLocalPlayerState();
     if (local) {
@@ -602,6 +627,7 @@ export class Game {
 
       // Only mark world as loaded AFTER all scene objects are successfully created
       this.worldKey = nextWorldKey;
+      this.hud.minimap.setHeightmap(generatedHeightmap);
     } catch (err) {
       console.error('[initGameWorld] Failed to build scene objects:', err);
       // Do NOT set worldKey so the next MATCH_STATE retries world creation
@@ -668,67 +694,76 @@ export class Game {
 
   private syncHudState() {
     const local = this.getLocalPlayerState();
+    this.hud.inventory.hide();
+    this.hud.fletchButton.setVisible(false);
+
     if (this.phase === 'offline') {
-      if (this.selectedArrowType === 'teleport' && this.offlineTeleportArrows <= 0) this.selectedArrowType = 'normal';
-      this.hud.arrowCounter.count = this.offlineArrowCount;
-      this.hud.inventory.setInventory({
-        arrows: this.offlineArrowCount,
-        teleportArrows: this.offlineTeleportArrows,
-        hasShield: this.offlineHasShield,
-        selectedArrowType: this.selectedArrowType,
-      });
-      this.hud.fletchButton.setVisible(false);
       this.hud.teleportButton.setVisible(this.roundActive);
-      this.hud.teleportButton.setEnabled(this.offlineTeleportArrows > 0);
+      this.hud.teleportButton.setEnabled(true);
       this.hud.teleportButton.setLabel(this.selectedArrowType === 'teleport' ? 'Teleport Armed' : 'Teleport');
       this.hud.spectatorButton.setVisible(false);
       this.hud.zoneBanner.hide();
       this.hud.statusBanner.hide();
+      this.hud.playerCount.hide();
+      this.hud.shieldGlow.setActive(this.offlineHasShield);
       this.bowModel.setVisible(true);
       this.swipeCamera.setEnabled(true);
       this.swipeCamera.setForcedPitchOffset(0);
+      if (this.roundActive) {
+        const cam = this.sceneManager.camera.position;
+        const angles = this.swipeCamera.getAngles();
+        this.hud.minimap.updateLocal(cam.x, cam.z, 0, angles.yaw);
+        this.hud.minimap.show();
+      } else {
+        this.hud.minimap.hide();
+      }
       return;
     }
 
     if (!local) {
-      this.hud.fletchButton.setVisible(false);
-      this.hud.teleportButton.setVisible(false);
       this.hud.spectatorButton.setVisible(false);
+      this.hud.playerCount.hide();
+      this.hud.shieldGlow.setActive(false);
       return;
     }
 
-    if (this.selectedArrowType === 'teleport' && local.teleportArrows <= 0) this.selectedArrowType = 'normal';
-    this.hud.arrowCounter.count = local.arrows;
-    this.hud.inventory.setInventory({
-      arrows: local.arrows,
-      teleportArrows: local.teleportArrows,
-      hasShield: local.hasShield,
-      selectedArrowType: this.selectedArrowType,
-    });
+    // Update player count indicator
+    if (this.matchState) {
+      const total = this.matchState.players.length;
+      const alive = this.matchState.players.filter((p) => p.alive).length;
+      const isPlaying = this.matchState.phase === 'playing';
+      this.hud.playerCount.update(total, alive, isPlaying);
+      this.hud.playerCount.show();
 
-    const buttonsVisible = this.phase === 'playing' && this.matchState?.phase === 'playing';
-    this.hud.fletchButton.setVisible(buttonsVisible && local.alive && !local.spectating);
-    this.hud.fletchButton.setEnabled(local.alive && !local.spectating);
-    this.hud.fletchButton.setLabel(local.isFletching ? 'Cancel Fletch' : 'Fletch');
-    this.hud.teleportButton.setVisible(buttonsVisible && local.alive && !local.spectating);
-    this.hud.teleportButton.setEnabled(local.teleportArrows > 0);
-    this.hud.teleportButton.setLabel(this.selectedArrowType === 'teleport' ? 'Teleport Armed' : 'Teleport');
-    this.hud.spectatorButton.setVisible(local.spectating);
-
-    if (local.isFletching) {
-      this.hud.statusBanner.show('Fletching...');
-      this.swipeCamera.setForcedPitchOffset(-Math.PI / 6);
-    } else if (!local.spectating) {
-      this.hud.statusBanner.hide();
-      this.swipeCamera.setForcedPitchOffset(0);
+      if (isPlaying) {
+        const angles = this.swipeCamera.getAngles();
+        const spectating = !!local?.spectating;
+        this.hud.minimap.update(this.localPlayerId, this.matchState.players, angles.yaw, spectating);
+        this.hud.minimap.show();
+      } else {
+        this.hud.minimap.hide();
+      }
     }
 
+    this.hud.shieldGlow.setActive(local.hasShield);
+    this.hud.spectatorButton.setVisible(false); // hidden for now
+
+    const isPlaying = this.matchState?.phase === 'playing';
+    this.hud.teleportButton.setVisible(!!isPlaying && local.alive && !local.spectating);
+    this.hud.teleportButton.setEnabled(true);
+    this.hud.teleportButton.setLabel(this.selectedArrowType === 'teleport' ? 'Teleport Armed' : 'Teleport');
+
     if (!local.spectating) {
+      if (Date.now() >= this.hintUntil) this.hud.statusBanner.hide();
+      this.swipeCamera.setForcedPitchOffset(0);
       this.bowModel.setVisible(true);
+      this.pullSlider.setVisible(true);
       this.swipeCamera.setEnabled(true);
     } else {
       this.bowModel.setVisible(false);
-      this.swipeCamera.setEnabled(false);
+      this.pullSlider.setVisible(false);
+      // Spectator uses its own camera control — enable swipe for orbit
+      this.swipeCamera.setEnabled(true);
     }
   }
 
@@ -774,6 +809,7 @@ export class Game {
     this.sceneManager.camera.getWorldDirection(direction);
     const arrowType = this.selectedArrowType === 'teleport' && local.teleportArrows > 0 ? 'teleport' : 'normal';
     const trajectory = this.computeTrajectory(force);
+    this.hud.minimap.setArrowTrail(trajectory.map((p) => p.position));
     const arrow = new ArrowModel(this.sceneManager.scene, true);
     this.activeArrows.push(arrow);
 
@@ -828,6 +864,7 @@ export class Game {
     this.hud.arrowCounter.count = this.offlineArrowCount;
 
     const trajectory = this.computeTrajectory(force);
+    this.hud.minimap.setArrowTrail(trajectory.map((p) => p.position));
     const arrow = new ArrowModel(this.sceneManager.scene, true);
     this.activeArrows.push(arrow);
 
@@ -850,11 +887,16 @@ export class Game {
       const players = this.offlineEnemyAlive ? [{ id: 'enemy', position: this.spawns.enemy }] : [];
       const hit = checkTrajectoryHits(trajectory, players, this.localPlayerId);
       if (hit) {
-        this.offlineEnemyAlive = false;
-        this.playerMarkers.get('enemy')?.mesh.visible && (this.playerMarkers.get('enemy')!.mesh.visible = false);
-        this.roundActive = false;
-        this.round.end('hit');
-        this.roundEndScreen.show('Hit!', 'Tap to play again', () => this.startOfflineRound());
+        const hitDelayMs = Math.max(50, hit.hitTime * 1000);
+        setTimeout(() => {
+          if (!this.offlineEnemyAlive) return;
+          this.offlineEnemyAlive = false;
+          const marker = this.playerMarkers.get('enemy');
+          if (marker) marker.mesh.visible = false;
+          this.roundActive = false;
+          this.round.end('hit');
+          this.roundEndScreen.show('Hit!', 'Tap to play again', () => this.startOfflineRound());
+        }, hitDelayMs);
       }
     }
 
@@ -951,7 +993,7 @@ export class Game {
     this.playerMarkers.set('enemy', marker);
     this.snapLocalCamera(this.spawns.local, true);
     this.startOfflineRound();
-        this.syncHudState();
+    this.syncHudState();
   }
 
   private startOfflineRound() {
@@ -972,15 +1014,26 @@ export class Game {
 
   private updateSpectatorCamera() {
     const local = this.getLocalPlayerState();
-    if (!local?.spectating || !this.matchState) return;
-    const targetId = this.spectatorTargetId ?? this.matchState.players.find((player) => player.alive && player.id !== local.id)?.id;
-    if (!targetId) return;
-    const target = this.matchState.players.find((player) => player.id === targetId);
-    if (!target) return;
-    const view = this.remoteViews.get(targetId) ?? { yaw: target.viewYaw, pitch: target.viewPitch };
-    this.sceneManager.camera.position.set(target.position.x, target.position.y + SPAWN.PLAYER_EYE_HEIGHT, target.position.z);
-    this.swipeCamera.setLook(view.yaw, view.pitch);
-    this.hud.statusBanner.show(`Spectating ${target.displayName}`);
+    if (!local?.spectating || !this.matchState || !this.world) return;
+
+    // Bird's-eye orbit: swipe rotates around map center, pitch controls elevation
+    const angles = this.swipeCamera.getAngles();
+    const orbitYaw = angles.yaw;
+    // Clamp pitch: -0.15 (nearly level) to 1.3 (nearly top-down)
+    const orbitPitch = Math.max(0.15, Math.min(1.3, -angles.pitch + 0.8));
+    const mapSize = this.world.terrain.mapSize;
+    const orbitDist = mapSize * 0.7;
+
+    const horizontalDist = Math.cos(orbitPitch) * orbitDist;
+    const height = Math.sin(orbitPitch) * orbitDist;
+
+    const cx = Math.sin(orbitYaw) * horizontalDist;
+    const cz = Math.cos(orbitYaw) * horizontalDist;
+    this.sceneManager.camera.position.set(cx, Math.max(10, height), cz);
+    this.sceneManager.camera.lookAt(0, 0, 0);
+
+    const aliveCount = this.matchState.players.filter((p) => p.alive).length;
+    this.hud.statusBanner.show(`Spectating \u2014 ${aliveCount} alive`);
   }
 
   private cycleSpectatorTarget() {
@@ -1017,13 +1070,16 @@ export class Game {
     this.menuScreen.show();
     this.lobbyScreen.hide();
     this.roundEndScreen.hide();
-        this.phase = 'menu';
+    this.phase = 'menu';
     this.selectedArrowType = 'normal';
     this.hud.fletchButton.setVisible(false);
     this.hud.teleportButton.setVisible(false);
     this.hud.spectatorButton.setVisible(false);
     this.hud.statusBanner.hide();
     this.hud.zoneBanner.hide();
+    this.hud.playerCount.hide();
+    this.hud.minimap.hide();
+    this.hud.shieldGlow.setActive(false);
   }
 
   private startMatchStateRetry() {

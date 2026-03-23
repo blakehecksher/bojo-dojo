@@ -99,6 +99,7 @@ export interface PlayerPublicState {
   colorIndex: number;
   alive: boolean;
   spectating: boolean;
+  connected: boolean;
   hasShield: boolean;
   arrows: number;
   teleportArrows: number;

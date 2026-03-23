@@ -128,6 +128,52 @@ export class LobbyScreen {
     });
     this.overlay.appendChild(this.playerListEl);
 
+    // How to play
+    const howToPlay = document.createElement('div');
+    Object.assign(howToPlay.style, {
+      marginTop: '16px',
+      padding: '12px 20px',
+      background: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: '8px',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+      maxWidth: '280px',
+      textAlign: 'center',
+      lineHeight: '1.5',
+    });
+    const howTitle = document.createElement('div');
+    howTitle.textContent = 'How to Play';
+    Object.assign(howTitle.style, {
+      fontSize: '13px',
+      fontWeight: 'bold',
+      color: 'rgba(255, 255, 255, 0.7)',
+      letterSpacing: '1px',
+      marginBottom: '8px',
+      textTransform: 'uppercase',
+    });
+    howToPlay.appendChild(howTitle);
+
+    const tips = [
+      'Swipe to look around',
+      'Pull the right slider down to draw, release to fire',
+      'Tap Teleport to switch arrow types',
+      'Pick up shields (blue glow) for one free hit',
+      'Last player alive wins the round',
+    ];
+    const tipList = document.createElement('div');
+    Object.assign(tipList.style, { textAlign: 'left' });
+    for (const tip of tips) {
+      const line = document.createElement('div');
+      line.textContent = `\u2022  ${tip}`;
+      Object.assign(line.style, {
+        fontSize: '12px',
+        color: 'rgba(255, 255, 255, 0.45)',
+        marginBottom: '4px',
+      });
+      tipList.appendChild(line);
+    }
+    howToPlay.appendChild(tipList);
+    this.overlay.appendChild(howToPlay);
+
     // Start button
     this.startBtn = document.createElement('button');
     this.startBtn.textContent = 'Start Match';
@@ -165,7 +211,7 @@ export class LobbyScreen {
 
     // Waiting text (for non-hosts) — pulsing
     this.waitingEl = document.createElement('div');
-    this.waitingEl.textContent = 'Waiting for host to start...';
+    this.waitingEl.textContent = 'Waiting for host to start the match...';
     Object.assign(this.waitingEl.style, {
       fontSize: '14px', color: 'rgba(255,255,255,0.4)', marginTop: '16px',
       animation: 'lobby-pulse 2s ease-in-out infinite',

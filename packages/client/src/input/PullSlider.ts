@@ -207,6 +207,10 @@ export class PullSlider implements InputHandler {
     }
   }
 
+  setVisible(visible: boolean) {
+    this.container.style.display = visible ? '' : 'none';
+  }
+
   dispose() {
     window.removeEventListener('resize', this.updateZone);
     this.container.remove();

@@ -1,8 +1,9 @@
 import { INPUT } from '@bojo-dojo/common';
 import type { InputHandler } from './InputManager';
 
-const STICK_RADIUS = 50;     // px — outer ring radius
-const KNOB_RADIUS = 20;      // px — inner knob radius
+const STICK_RADIUS = 70;     // px — functional radius (touch travel distance)
+const VISUAL_RADIUS = 56;   // px — visible outer ring radius
+const KNOB_RADIUS = 22;      // px — inner knob radius
 const DEAD_ZONE = INPUT.THUMBSTICK_DEAD_ZONE; // fraction
 
 /**
@@ -30,12 +31,13 @@ export class Thumbstick implements InputHandler {
   constructor(private hudElement: HTMLElement) {
     // Container (outer ring)
     this.container = document.createElement('div');
+    const visualOffset = STICK_RADIUS - VISUAL_RADIUS;
     Object.assign(this.container.style, {
       position: 'absolute',
-      bottom: '60px',
-      left: '30px',
-      width: `${STICK_RADIUS * 2}px`,
-      height: `${STICK_RADIUS * 2}px`,
+      bottom: `${50 + visualOffset}px`,
+      left: `${18 + visualOffset}px`,
+      width: `${VISUAL_RADIUS * 2}px`,
+      height: `${VISUAL_RADIUS * 2}px`,
       borderRadius: '50%',
       border: '2px solid rgba(255, 255, 255, 0.4)',
       background: 'rgba(255, 255, 255, 0.08)',
@@ -64,8 +66,8 @@ export class Thumbstick implements InputHandler {
 
   private updateZone = () => {
     // Hit zone: tight area around stick (bottom-left corner)
-    this.zoneRight = window.innerWidth * 0.20;
-    this.zoneTop = window.innerHeight * 0.65;
+    this.zoneRight = window.innerWidth * 0.25;
+    this.zoneTop = window.innerHeight * 0.60;
   };
 
   hitTest(x: number, y: number): boolean {
@@ -140,9 +142,10 @@ export class Thumbstick implements InputHandler {
       this.dy = outY;
     }
 
-    // Move knob visual
-    const visualX = offX;
-    const visualY = offY;
+    // Move knob visual — scale to fit within smaller visual ring
+    const visualScale = VISUAL_RADIUS / STICK_RADIUS;
+    const visualX = offX * visualScale;
+    const visualY = offY * visualScale;
     this.knob.style.transform = `translate(calc(-50% + ${visualX}px), calc(-50% + ${visualY}px))`;
   }
 

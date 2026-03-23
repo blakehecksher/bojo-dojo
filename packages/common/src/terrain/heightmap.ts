@@ -32,12 +32,6 @@ export function generateHeightmap(seed: number, params: TerrainParams): Heightma
       // Normalize to [0, 1]
       value = (value / maxAmplitude + 1) / 2;
 
-      // Edge falloff: push edges toward 0 to prevent terrain cliffs at map border
-      const edgeX = Math.min(x, resolution - 1 - x) / (resolution * 0.15);
-      const edgeZ = Math.min(z, resolution - 1 - z) / (resolution * 0.15);
-      const edgeFactor = Math.min(1, Math.min(edgeX, edgeZ));
-      value *= edgeFactor;
-
       heights[z * resolution + x] = value * maxElevation;
     }
   }
