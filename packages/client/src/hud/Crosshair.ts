@@ -121,6 +121,9 @@ export class Crosshair {
     this.pin.style.boxShadow = shadow;
   }
 
+  show() { this.el.style.display = ''; }
+  hide() { this.el.style.display = 'none'; }
+
   dispose() {
     this.el.remove();
   }

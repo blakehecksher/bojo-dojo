@@ -18,6 +18,10 @@ export class MenuScreen {
   private onCreateGame?: (name: string, colorIndex: number) => void;
   private onJoinGame?: (code: string, name: string, colorIndex: number) => void;
   private onOfflinePlay?: () => void;
+  private onSpectate?: () => void;
+  private onBackToMenu?: () => void;
+  private backButton: HTMLButtonElement | null = null;
+  private backWrap: HTMLDivElement | null = null;
 
   constructor(parent: HTMLElement) {
     this.overlay = document.createElement('div');
@@ -30,7 +34,9 @@ export class MenuScreen {
       alignItems: 'center',
       justifyContent: 'center',
       gap: '16px',
-      background: 'rgba(0, 0, 0, 0.85)',
+      background: 'rgba(0, 0, 0, 0.6)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
       zIndex: '200',
       pointerEvents: 'auto',
       opacity: '0',
@@ -222,6 +228,46 @@ export class MenuScreen {
     });
     this.overlay.appendChild(offlineBtn);
 
+    // Spectate button
+    const spectateBtn = this.makeButton('Spectate Bots');
+    Object.assign(spectateBtn.style, {
+      marginTop: '4px',
+      fontSize: '14px',
+      padding: '8px 20px',
+      opacity: '0.6',
+      background: 'rgba(255, 255, 255, 0.08)',
+    });
+    spectateBtn.addEventListener('pointerdown', () => {
+      this.onSpectate?.();
+    });
+    this.overlay.appendChild(spectateBtn);
+
+    // Back to menu button (floating, shown during spectate — bottom center, above banner)
+    const backWrap = document.createElement('div');
+    Object.assign(backWrap.style, {
+      position: 'absolute',
+      bottom: '130px',
+      left: '0',
+      width: '100%',
+      display: 'none',
+      justifyContent: 'center',
+      zIndex: '300',
+      pointerEvents: 'none',
+    });
+    this.backButton = this.makeButton('Back to Menu');
+    Object.assign(this.backButton.style, {
+      fontSize: '14px',
+      padding: '10px 24px',
+      pointerEvents: 'auto',
+    });
+    this.backButton.addEventListener('click', () => {
+      this.onBackToMenu?.();
+      this.hideBackButton();
+    });
+    backWrap.appendChild(this.backButton);
+    this.backWrap = backWrap;
+    parent.appendChild(backWrap);
+
     this.overlay.style.display = 'none';
     parent.appendChild(this.overlay);
   }
@@ -271,10 +317,18 @@ export class MenuScreen {
     return btn;
   }
 
-  on(events: { onCreate?: (name: string, colorIndex: number) => void; onJoin?: (code: string, name: string, colorIndex: number) => void; onOffline?: () => void }) {
+  on(events: {
+    onCreate?: (name: string, colorIndex: number) => void;
+    onJoin?: (code: string, name: string, colorIndex: number) => void;
+    onOffline?: () => void;
+    onSpectate?: () => void;
+    onBackToMenu?: () => void;
+  }) {
     this.onCreateGame = events.onCreate;
     this.onJoinGame = events.onJoin;
     this.onOfflinePlay = events.onOffline;
+    this.onSpectate = events.onSpectate;
+    this.onBackToMenu = events.onBackToMenu;
   }
 
   /** Pre-fill the join room code input. */
@@ -287,6 +341,7 @@ export class MenuScreen {
     // Force reflow, then transition opacity
     void this.overlay.offsetHeight;
     this.overlay.style.opacity = '1';
+    this.hideBackButton();
   }
 
   hide() {
@@ -296,5 +351,16 @@ export class MenuScreen {
     }, 300);
   }
 
-  dispose() { this.overlay.remove(); }
+  showBackButton() {
+    if (this.backWrap) this.backWrap.style.display = 'flex';
+  }
+
+  hideBackButton() {
+    if (this.backWrap) this.backWrap.style.display = 'none';
+  }
+
+  dispose() {
+    this.overlay.remove();
+    this.backWrap?.remove();
+  }
 }

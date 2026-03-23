@@ -84,6 +84,9 @@ export class Timer {
     }
   }
 
+  show() { this.el.style.display = ''; }
+  hide() { this.el.style.display = 'none'; }
+
   dispose() {
     this.stop();
     this.el.remove();

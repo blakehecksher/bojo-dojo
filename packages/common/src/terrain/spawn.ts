@@ -39,7 +39,7 @@ function getMinimumSpawnDistance(heightmap: HeightmapData, playerCount: number):
   );
 }
 
-function hasLineOfSight(heightmap: HeightmapData, a: Vec3, b: Vec3): boolean {
+export function hasLineOfSight(heightmap: HeightmapData, a: Vec3, b: Vec3): boolean {
   const eyeHeight = SPAWN.PLAYER_EYE_HEIGHT;
   const steps = 50;
 

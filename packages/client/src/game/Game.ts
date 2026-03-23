@@ -108,12 +108,15 @@ export class Game {
   private pendingTeleportArrow: ArrowModel | null = null;
   private pendingTeleportPos: Vec3 | null = null;
   private hintUntil = 0;
+  private showcaseConnection: GameConnection;
+  private showcaseMode = false;
 
   constructor() {
     this.sceneManager = new SceneManager();
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.connection = new GameConnection();
+    this.showcaseConnection = new GameConnection();
     this.menuScreen = new MenuScreen(this.hud.element);
     this.lobbyScreen = new LobbyScreen(this.hud.element);
     this.roundEndScreen = new RoundEndScreen(this.hud.element);
@@ -135,6 +138,7 @@ export class Game {
     this.setupMenuHandlers();
     this.setupNetworkHandlers();
     this.setupConnectionStateHandlers();
+    this.setupShowcaseHandlers();
     this.setupFrameLoop();
     this.setupViewSync();
     const roomFromUrl = new URLSearchParams(window.location.search).get('room');
@@ -158,6 +162,7 @@ export class Game {
     }
 
     this.sceneManager.start();
+    this.connectShowcase();
   }
 
   private getLocalPlayerState(): PlayerPublicState | null {
@@ -261,13 +266,39 @@ export class Game {
   private setupMenuHandlers() {
     this.menuScreen.on({
       onCreate: (name, colorIndex) => {
+        this.disconnectShowcase();
         this.joinRoom(this.generateRoomCode(), name, colorIndex);
       },
       onJoin: (code, name, colorIndex) => {
+        this.disconnectShowcase();
         this.joinRoom(code, name, colorIndex);
       },
       onOffline: () => {
+        this.disconnectShowcase();
         this.startOffline();
+      },
+      onSpectate: () => {
+        // Enter full spectator mode for the showcase match
+        this.menuScreen.hide();
+        this.menuScreen.showBackButton();
+        this.showcaseMode = true;
+        this.hud.statusBanner.show('Spectating Bot Match');
+        this.swipeCamera.setEnabled(true);
+        // Hide gameplay UI
+        this.bowModel.setVisible(false);
+        this.pullSlider.setVisible(false);
+        this.hud.inventory.hide();
+        this.hud.timer.hide();
+        this.hud.fletchButton.setVisible(false);
+        this.hud.teleportButton.setVisible(false);
+        this.hud.crosshair.hide();
+      },
+      onBackToMenu: () => {
+        this.showcaseMode = false;
+        this.hud.statusBanner.hide();
+        this.hud.minimap.hide();
+        this.menuScreen.hideBackButton();
+        this.menuScreen.show();
       },
     });
     this.lobbyScreen.onStartMatch(() => {
@@ -434,7 +465,17 @@ export class Game {
 
   private setupFrameLoop() {
     this.sceneManager.onFrame((dt) => {
-      if (!this.isSpectating()) {
+      if (this.showcaseMode || this.isSpectating()) {
+        // Thumbstick also controls spectator orbit
+        if (this.thumbstick.dx !== 0 || this.thumbstick.dy !== 0) {
+          const speed = INPUT.THUMBSTICK_MAX_SPEED * DEG2RAD;
+          this.swipeCamera.applyDelta(
+            -this.thumbstick.dx * speed * dt,
+            -this.thumbstick.dy * speed * dt,
+          );
+        }
+        this.updateSpectatorCamera();
+      } else {
         this.swipeCamera.update();
         if (this.thumbstick.dx !== 0 || this.thumbstick.dy !== 0) {
           const speed = INPUT.THUMBSTICK_MAX_SPEED * DEG2RAD;
@@ -443,8 +484,6 @@ export class Game {
             -this.thumbstick.dy * speed * dt,
           );
         }
-      } else {
-        this.updateSpectatorCamera();
       }
 
       if (this.isDrawing && this.pullSlider.force > INPUT.PULL_SLIDER_CANCEL_ZONE && this.heightmap) {
@@ -883,7 +922,8 @@ export class Game {
       }
     });
 
-    if (arrowType !== 'teleport') {
+    {
+      // All arrow types (including teleport) can hit players
       const players = this.offlineEnemyAlive ? [{ id: 'enemy', position: this.spawns.enemy }] : [];
       const hit = checkTrajectoryHits(trajectory, players, this.localPlayerId);
       if (hit) {
@@ -1013,10 +1053,16 @@ export class Game {
   }
 
   private updateSpectatorCamera() {
-    const local = this.getLocalPlayerState();
-    if (!local?.spectating || !this.matchState || !this.world) return;
+    // Works for both showcase mode and in-game spectator mode
+    const isShowcase = this.showcaseMode;
+    if (!isShowcase) {
+      const local = this.getLocalPlayerState();
+      if (!local?.spectating) return;
+    }
+    if (!this.matchState || !this.world) return;
 
     // Bird's-eye orbit: swipe rotates around map center, pitch controls elevation
+    this.swipeCamera.update();
     const angles = this.swipeCamera.getAngles();
     const orbitYaw = angles.yaw;
     // Clamp pitch: -0.15 (nearly level) to 1.3 (nearly top-down)
@@ -1032,8 +1078,10 @@ export class Game {
     this.sceneManager.camera.position.set(cx, Math.max(10, height), cz);
     this.sceneManager.camera.lookAt(0, 0, 0);
 
-    const aliveCount = this.matchState.players.filter((p) => p.alive).length;
-    this.hud.statusBanner.show(`Spectating \u2014 ${aliveCount} alive`);
+    if (!isShowcase) {
+      const aliveCount = this.matchState.players.filter((p) => p.alive).length;
+      this.hud.statusBanner.show(`Spectating \u2014 ${aliveCount} alive`);
+    }
   }
 
   private cycleSpectatorTarget() {
@@ -1054,6 +1102,109 @@ export class Game {
     return { x: cx, y: cy, z: cz };
   }
 
+  // --- Showcase (background bot match) ---
+
+  private connectShowcase() {
+    this.showcaseConnection.connect(PARTYKIT_HOST, 'showcase', 'spectator', 0);
+    this.showcaseMode = true;
+  }
+
+  private disconnectShowcase() {
+    this.showcaseMode = false;
+    this.showcaseConnection.disconnect();
+    this.hud.showcaseScoreboard.hide();
+  }
+
+  private setupShowcaseHandlers() {
+    this.showcaseConnection.onMessage(async (msg: ServerMessage) => {
+      // Only process showcase messages when in menu/showcase mode
+      if (this.phase !== 'menu' && !this.showcaseMode) return;
+
+      switch (msg.type) {
+        case 'MATCH_STATE':
+          try {
+            await this.applyShowcaseState(msg.state);
+          } catch (err) {
+            console.error('Showcase MATCH_STATE apply failed', err);
+          }
+          break;
+        case 'ARROW_FIRED':
+          this.animateRemoteArrow(msg.origin, msg.direction, msg.force);
+          break;
+        case 'ARROW_LANDED':
+          this.ensureLandedArrow(msg.arrowId, msg.position);
+          break;
+        case 'PLAYER_HIT': {
+          const marker = this.playerMarkers.get(msg.targetId);
+          if (marker) {
+            marker.flashHit();
+            if (!msg.blockedByShield) setTimeout(() => { marker.mesh.visible = false; }, 300);
+          }
+          break;
+        }
+        case 'PLAYER_TELEPORT': {
+          const marker = this.playerMarkers.get(msg.playerId);
+          if (marker) marker.setPosition(msg.position.x, msg.position.y, msg.position.z);
+          break;
+        }
+        case 'PLAYER_VIEW':
+          this.remoteViews.set(msg.playerId, { yaw: msg.yaw, pitch: msg.pitch });
+          break;
+        case 'ROUND_START':
+          this.clearRenderedArrows();
+          break;
+      }
+    });
+  }
+
+  /**
+   * Apply showcase match state for rendering only — does NOT touch
+   * this.phase, lobby, menu, or any gameplay state.
+   */
+  private async applyShowcaseState(state: MatchState) {
+    this.matchState = state;
+
+    if (state.world) {
+      await this.ensureWorldLoaded(state.world);
+      // In showcase, render ALL players (no local player to exclude)
+      this.syncShowcasePlayers(state.players);
+      this.pickupMarkers.sync(state.world.pickups);
+      this.syncLandedArrows(state.landedArrows);
+    }
+
+    // Update minimap and scoreboard for showcase
+    if (this.heightmap && this.showcaseMode) {
+      const angles = this.swipeCamera.getAngles();
+      this.hud.minimap.update('', state.players, angles.yaw, true);
+      this.hud.minimap.show();
+    }
+    this.hud.showcaseScoreboard.update(state.scores, state.players);
+    this.hud.showcaseScoreboard.show();
+  }
+
+  /**
+   * Like syncNetworkPlayers but renders ALL players (no local player exclusion).
+   */
+  private syncShowcasePlayers(players: PlayerPublicState[]) {
+    const activeIds = new Set<string>();
+    for (const player of players) {
+      activeIds.add(player.id);
+      let marker = this.playerMarkers.get(player.id);
+      if (!marker) {
+        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex);
+        this.playerMarkers.set(player.id, marker);
+      }
+      marker.setPosition(player.position.x, player.position.y, player.position.z);
+      marker.mesh.visible = player.alive;
+      marker.setShield(player.hasShield);
+    }
+    for (const [id, marker] of this.playerMarkers) {
+      if (activeIds.has(id)) continue;
+      marker.dispose();
+      this.playerMarkers.delete(id);
+    }
+  }
+
   showMenu() {
     sessionStorage.removeItem('bojo-session');
     this.stopMatchStateRetry();
@@ -1072,6 +1223,8 @@ export class Game {
     this.roundEndScreen.hide();
     this.phase = 'menu';
     this.selectedArrowType = 'normal';
+    // Reconnect showcase when returning to menu
+    this.connectShowcase();
     this.hud.fletchButton.setVisible(false);
     this.hud.teleportButton.setVisible(false);
     this.hud.spectatorButton.setVisible(false);

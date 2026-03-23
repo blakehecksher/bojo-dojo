@@ -36,7 +36,7 @@ export const TERRAIN_BASE: TerrainParams = {
 
 export const TERRAIN_SCALING = {
   SIZE_PER_EXTRA_PLAYER: 25,
-  MAX_BETA_PLAYERS: 4,
+  MAX_BETA_PLAYERS: 6,
 } as const;
 
 // --- Spawn & Placement ---

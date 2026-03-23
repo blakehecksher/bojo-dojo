@@ -100,6 +100,7 @@ export interface PlayerPublicState {
   alive: boolean;
   spectating: boolean;
   connected: boolean;
+  isBot: boolean;
   hasShield: boolean;
   arrows: number;
   teleportArrows: number;

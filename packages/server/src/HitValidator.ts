@@ -37,9 +37,8 @@ export function validateArrowResolution(
     .filter((pickup) => pickup.active)
     .map((pickup) => ({ id: pickup.id, position: pickup.position }));
 
-  const playerHit = arrowType === 'normal'
-    ? checkTrajectoryHits(trajectory, activePlayers, shooterId)
-    : null;
+  // All arrow types (normal and teleport) can hit players
+  const playerHit = checkTrajectoryHits(trajectory, activePlayers, shooterId);
   const pickupHit = checkTrajectoryPickupHits(trajectory, activePickups);
   const landingPosition = trajectory[trajectory.length - 1].position;
 

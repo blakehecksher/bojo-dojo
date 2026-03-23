@@ -22,6 +22,7 @@ export interface PlayerInfo {
   connId: string | null;
   displayName: string;
   colorIndex: number;
+  isBot: boolean;
   alive: boolean;
   spectating: boolean;
   hasShield: boolean;
@@ -48,7 +49,7 @@ export class RoomState {
   players = new Map<string, PlayerInfo>();
   hostId: string | null = null;
 
-  playerLimit = 4;
+  playerLimit = 6;
   world: WorldLayout | null = null;
   heightmap: HeightmapData | null = null;
   pickups: PickupState[] = [];
@@ -75,6 +76,7 @@ export class RoomState {
       connId,
       displayName,
       colorIndex,
+      isBot: false,
       alive: false,
       spectating: false,
       hasShield: false,
@@ -96,10 +98,37 @@ export class RoomState {
     return { player, isReconnect: false };
   }
 
+  addBotPlayer(id: string, displayName: string, colorIndex: number): PlayerInfo {
+    const player: PlayerInfo = {
+      id,
+      connId: null,
+      displayName,
+      colorIndex,
+      isBot: true,
+      alive: false,
+      spectating: false,
+      hasShield: false,
+      arrows: PACING.STARTING_ARROWS,
+      teleportArrows: PACING.TELEPORT_ARROWS_PER_ROUND,
+      isFletching: false,
+      fletchEndsAt: null,
+      position: zeroVec3(),
+      spawnIndex: this.players.size,
+      viewYaw: 0,
+      viewPitch: 0,
+      zoneOutsideSince: null,
+      disconnectDeadline: null,
+    };
+    this.players.set(id, player);
+    if (!this.hostId) this.hostId = id;
+    this.scores[id] = this.scores[id] ?? 0;
+    return player;
+  }
+
   removeConnection(connId: string): { playerId: string | null; removed: boolean; isEmpty: boolean } {
     const player = [...this.players.values()].find((entry) => entry.connId === connId);
     if (!player) {
-      return { playerId: null, removed: false, isEmpty: this.players.size === 0 };
+      return { playerId: null, removed: false, isEmpty: this.getRealPlayerCount() === 0 };
     }
 
     player.connId = null;
@@ -112,7 +141,7 @@ export class RoomState {
         const next = this.players.keys().next();
         this.hostId = next.done ? null : next.value;
       }
-      return { playerId: player.id, removed: true, isEmpty: this.players.size === 0 };
+      return { playerId: player.id, removed: true, isEmpty: this.getRealPlayerCount() === 0 };
     }
 
     player.disconnectDeadline = Date.now() + DISCONNECT_GRACE_MS;
@@ -212,6 +241,10 @@ export class RoomState {
 
   getConnectedPlayerIds(): string[] {
     return [...this.players.values()].filter((player) => player.connId).map((player) => player.id);
+  }
+
+  getRealPlayerCount(): number {
+    return [...this.players.values()].filter((p) => !p.isBot).length;
   }
 
   getAlivePlayers(): PlayerInfo[] {
@@ -451,7 +484,8 @@ export class RoomState {
       colorIndex: player.colorIndex,
       alive: player.alive,
       spectating: player.spectating,
-      connected: player.connId !== null,
+      connected: player.isBot || player.connId !== null,
+      isBot: player.isBot,
       hasShield: player.hasShield,
       arrows: player.arrows,
       teleportArrows: player.teleportArrows,
