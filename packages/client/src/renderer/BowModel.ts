@@ -58,7 +58,7 @@ export class BowModel {
       limbMat
     );
     this.topLimb.position.set(0, 0.18, -0.02);
-    this.topLimb.rotation.x = -0.15;
+    this.topLimb.rotation.x = 0.12;
     this.topLimb.frustumCulled = false;
     this.topLimb.renderOrder = 999;
     this.group.add(this.topLimb);
@@ -69,7 +69,7 @@ export class BowModel {
       limbMat
     );
     this.bottomLimb.position.set(0, -0.18, -0.02);
-    this.bottomLimb.rotation.x = 0.15;
+    this.bottomLimb.rotation.x = -0.12;
     this.bottomLimb.frustumCulled = false;
     this.bottomLimb.renderOrder = 999;
     this.group.add(this.bottomLimb);
@@ -77,16 +77,16 @@ export class BowModel {
     // Limb tips — small dark wood caps
     const tipMat = new THREE.MeshLambertMaterial({ color: darkWood, depthTest: false });
     const topTip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.035), tipMat);
-    topTip.position.set(0, 0.3, -0.04);
+    topTip.position.set(0, 0.12, 0); // centered on limb end
     topTip.frustumCulled = false;
     topTip.renderOrder = 999;
-    this.group.add(topTip);
+    this.topLimb.add(topTip);
 
     const bottomTip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.035), tipMat);
-    bottomTip.position.set(0, -0.3, -0.04);
+    bottomTip.position.set(0, -0.12, 0); // centered on limb end
     bottomTip.frustumCulled = false;
     bottomTip.renderOrder = 999;
-    this.group.add(bottomTip);
+    this.bottomLimb.add(bottomTip);
 
     // String — line from top limb tip to bottom limb tip, passing through a midpoint
     this.stringPositions = new Float32Array([
@@ -120,9 +120,10 @@ export class BowModel {
     this.stringPositions[5] = pullZ;
     this.stringLine.geometry.attributes.position.needsUpdate = true;
 
-    const bend = force * 0.12;
-    this.topLimb.rotation.x = -0.15 + bend;
-    this.bottomLimb.rotation.x = 0.15 - bend;
+    // On draw, limb tips bend further toward the player (same direction as string pull)
+    const bend = force * 0.20;
+    this.topLimb.rotation.x = 0.12 + bend;
+    this.bottomLimb.rotation.x = -0.12 - bend;
   }
 
   /** Trigger recoil animation (call on arrow fire). */

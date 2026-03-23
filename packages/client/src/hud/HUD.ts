@@ -5,6 +5,8 @@ import { InventorySlots } from './InventorySlots';
 import { ActionButton } from './ActionButton';
 import { StatusBanner } from './StatusBanner';
 import { PlayerCount } from './PlayerCount';
+import { Minimap } from './Minimap';
+import { ShieldGlow } from './ShieldGlow';
 
 /**
  * HUD — HTML overlay container managing all UI elements.
@@ -21,6 +23,8 @@ export class HUD {
   readonly statusBanner: StatusBanner;
   readonly zoneBanner: StatusBanner;
   readonly playerCount: PlayerCount;
+  readonly minimap: Minimap;
+  readonly shieldGlow: ShieldGlow;
 
   constructor() {
     this.element = document.getElementById('hud') as HTMLDivElement;
@@ -50,6 +54,8 @@ export class HUD {
       display: 'none',
     });
     this.playerCount = new PlayerCount(this.element);
+    this.minimap = new Minimap(this.element);
+    this.shieldGlow = new ShieldGlow(this.element);
   }
 
   dispose() {
@@ -63,5 +69,7 @@ export class HUD {
     this.statusBanner.dispose();
     this.zoneBanner.dispose();
     this.playerCount.dispose();
+    this.minimap.dispose();
+    this.shieldGlow.dispose();
   }
 }

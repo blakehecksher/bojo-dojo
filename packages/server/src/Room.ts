@@ -234,23 +234,12 @@ export class RoomState {
     if (!player || !player.alive || player.spectating) return { ok: false, reason: 'not-active' };
     if (player.isFletching) return { ok: false, reason: 'fletching' };
 
-    if (arrowType === 'teleport') {
-      if (player.teleportArrows <= 0) return { ok: false, reason: 'no-teleport-arrows' };
-    } else if (player.arrows <= 0) {
-      return { ok: false, reason: 'no-arrows' };
-    }
-
+    // Arrows and teleport arrows are unlimited
     return { ok: true };
   }
 
-  consumeShot(id: string, arrowType: 'normal' | 'teleport') {
-    const player = this.players.get(id);
-    if (!player) return;
-    if (arrowType === 'teleport') {
-      player.teleportArrows = Math.max(0, player.teleportArrows - 1);
-    } else {
-      player.arrows = Math.max(0, player.arrows - 1);
-    }
+  consumeShot(_id: string, _arrowType: 'normal' | 'teleport') {
+    // No-op: unlimited ammo
   }
 
   startFletching(id: string, now = Date.now()): { ok: boolean; durationSeconds?: number } {
@@ -462,6 +451,7 @@ export class RoomState {
       colorIndex: player.colorIndex,
       alive: player.alive,
       spectating: player.spectating,
+      connected: player.connId !== null,
       hasShield: player.hasShield,
       arrows: player.arrows,
       teleportArrows: player.teleportArrows,

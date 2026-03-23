@@ -95,6 +95,14 @@ export class InventorySlots {
       : 'none';
   }
 
+  hide() {
+    this.container.style.display = 'none';
+  }
+
+  show() {
+    this.container.style.display = 'flex';
+  }
+
   dispose() {
     this.container.remove();
   }

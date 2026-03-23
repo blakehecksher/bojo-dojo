@@ -45,12 +45,33 @@ export class MenuScreen {
       fontWeight: 'bold',
       color: '#fff',
       letterSpacing: '6px',
-      marginBottom: '24px',
+      marginBottom: '4px',
       textShadow: '0 0 20px rgba(255, 200, 50, 0.3), 3px 3px 8px rgba(0,0,0,0.8)',
     });
     this.overlay.appendChild(title);
 
-    // Name input
+    // Tagline
+    const tagline = document.createElement('div');
+    tagline.textContent = 'Aim. Shoot. Teleport. Last archer standing wins.';
+    Object.assign(tagline.style, {
+      fontSize: '14px',
+      color: 'rgba(255, 255, 255, 0.5)',
+      marginBottom: '20px',
+      letterSpacing: '0.5px',
+    });
+    this.overlay.appendChild(tagline);
+
+    // Name label + input
+    const nameLabel = document.createElement('div');
+    nameLabel.textContent = 'Choose your name';
+    Object.assign(nameLabel.style, {
+      fontSize: '12px',
+      color: 'rgba(255, 255, 255, 0.45)',
+      letterSpacing: '0.5px',
+      marginBottom: '-10px',
+    });
+    this.overlay.appendChild(nameLabel);
+
     const nameInput = document.createElement('input');
     nameInput.placeholder = 'Your name';
     nameInput.maxLength = 16;
@@ -85,7 +106,17 @@ export class MenuScreen {
     });
     this.overlay.appendChild(nameInput);
 
-    // Color picker row
+    // Color label + picker row
+    const colorLabel = document.createElement('div');
+    colorLabel.textContent = 'Choose your color';
+    Object.assign(colorLabel.style, {
+      fontSize: '12px',
+      color: 'rgba(255, 255, 255, 0.45)',
+      letterSpacing: '0.5px',
+      marginBottom: '-10px',
+    });
+    this.overlay.appendChild(colorLabel);
+
     this.selectedColorIndex = parseInt(localStorage.getItem('bojo-player-color') || '0', 10) || 0;
     const colorRow = document.createElement('div');
     Object.assign(colorRow.style, {
@@ -127,6 +158,17 @@ export class MenuScreen {
     this.overlay.appendChild(createBtn);
 
     // Join section
+    const joinLabel = document.createElement('div');
+    joinLabel.textContent = 'Have a room code?';
+    Object.assign(joinLabel.style, {
+      fontSize: '12px',
+      color: 'rgba(255, 255, 255, 0.45)',
+      letterSpacing: '0.5px',
+      marginBottom: '-10px',
+      marginTop: '4px',
+    });
+    this.overlay.appendChild(joinLabel);
+
     const joinRow = document.createElement('div');
     Object.assign(joinRow.style, { display: 'flex', gap: '8px', alignItems: 'center' });
 
@@ -158,7 +200,7 @@ export class MenuScreen {
     });
     joinRow.appendChild(codeInput);
 
-    const joinBtn = this.makeButton('Join');
+    const joinBtn = this.makeButton('Join Game');
     joinBtn.addEventListener('pointerdown', () => {
       const code = codeInput.value.trim();
       if (code) this.onJoinGame?.(code, nameInput.value || 'Player', this.selectedColorIndex);

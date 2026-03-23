@@ -186,6 +186,7 @@ export default class BojoDojo implements Party.Server {
 
     const arrowId = `arrow-${++arrowCounter}`;
     const flightTimeMs = Math.max(100, (trajectory[trajectory.length - 1].time) * 1000);
+    const firedInRound = this.room.currentRound;
 
     // Broadcast ARROW_FIRED immediately so animations start
     this.broadcastJson(
@@ -199,9 +200,30 @@ export default class BojoDojo implements Party.Server {
       [sender.id],
     );
 
-    // Delay all effects until arrow lands — keeps visuals in sync
+    // Apply player hit at the moment the arrow reaches the target, not when it lands
+    if (playerHit) {
+      const hitDelayMs = Math.max(50, playerHit.hitTime * 1000);
+      setTimeout(() => {
+        if (this.room.phase !== 'playing' || this.room.currentRound !== firedInRound) return;
+
+        const result = this.room.absorbOrKillPlayer(playerHit.targetId);
+        this.broadcastJson({
+          type: 'PLAYER_HIT',
+          targetId: playerHit.targetId,
+          arrowId,
+          blockedByShield: result.blockedByShield,
+        });
+        this.broadcastMatchState();
+
+        if (result.winnerId !== null) {
+          this.handleRoundResolved(result.winnerId);
+        }
+      }, hitDelayMs);
+    }
+
+    // Delay landing effects (arrow stuck in ground, pickups, teleport) until arrow lands
     setTimeout(() => {
-      if (this.room.phase !== 'playing') return;
+      if (this.room.phase !== 'playing' || this.room.currentRound !== firedInRound) return;
 
       this.room.addLandedArrow({
         id: arrowId,
@@ -232,7 +254,6 @@ export default class BojoDojo implements Party.Server {
       }
 
       if (arrowType === 'teleport') {
-        // Don't teleport dead players
         const teleporter = this.room.getPlayer(player.id);
         if (teleporter?.alive) {
           const teleported = this.room.teleportPlayer(player.id, landingPosition);
@@ -247,29 +268,7 @@ export default class BojoDojo implements Party.Server {
         }
       }
 
-      if (playerHit) {
-        // Don't apply hits from dead players — their arrows are visual-only after death
-        const shooter = this.room.getPlayer(player.id);
-        if (!shooter || !shooter.alive) {
-          this.broadcastMatchState();
-          return;
-        }
-
-        const result = this.room.absorbOrKillPlayer(playerHit.targetId);
-        this.broadcastJson({
-          type: 'PLAYER_HIT',
-          targetId: playerHit.targetId,
-          arrowId,
-          blockedByShield: result.blockedByShield,
-        });
-
-        this.broadcastMatchState();
-
-        if (result.winnerId !== null) {
-          this.handleRoundResolved(result.winnerId);
-          return;
-        }
-      } else {
+      if (!playerHit) {
         this.broadcastMatchState();
       }
     }, flightTimeMs);
