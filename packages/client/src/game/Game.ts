@@ -1053,7 +1053,12 @@ export class Game {
     this.offlineHasShield = false;
     this.selectedArrowType = 'normal';
     this.roundActive = true;
+    // Swap spawn positions each round so the player doesn't always start in the same spot
+    const temp = this.spawns.local;
+    this.spawns.local = this.spawns.enemy;
+    this.spawns.enemy = temp;
     this.playerMarkers.get('enemy')?.mesh && (this.playerMarkers.get('enemy')!.mesh.visible = true);
+    this.playerMarkers.get('enemy')?.setPosition(this.spawns.enemy.x, this.spawns.enemy.y, this.spawns.enemy.z);
     this.snapLocalCamera(this.spawns.local, true);
     this.clearRenderedArrows();
     this.resetDrawState();
