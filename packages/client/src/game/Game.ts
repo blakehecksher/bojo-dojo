@@ -751,6 +751,7 @@ export class Game {
       this.hud.shieldGlow.setActive(this.offlineHasShield);
       this.bowModel.setVisible(true);
       this.thumbstick.setVisible(true);
+      this.hud.crosshair.show();
       this.swipeCamera.setEnabled(true);
       this.swipeCamera.setForcedPitchOffset(0);
       if (this.roundActive) {
@@ -803,10 +804,12 @@ export class Game {
       this.bowModel.setVisible(true);
       this.thumbstick.setVisible(true);
       this.pullSlider.setVisible(true);
+      this.hud.crosshair.show();
       this.swipeCamera.setEnabled(true);
     } else {
       this.bowModel.setVisible(false);
       this.pullSlider.setVisible(false);
+      this.hud.crosshair.hide();
       // Spectator uses its own camera control — enable swipe for orbit
       this.swipeCamera.setEnabled(true);
     }
@@ -1119,6 +1122,9 @@ export class Game {
     this.showcaseMode = false;
     this.showcaseConnection.disconnect();
     this.hud.showcaseScoreboard.hide();
+    // Reset camera to ground level so it doesn't stay in the showcase orbital position
+    this.sceneManager.camera.position.set(0, SPAWN.PLAYER_EYE_HEIGHT, 0);
+    this.swipeCamera.setLook(0, -0.18);
   }
 
   private setupShowcaseHandlers() {

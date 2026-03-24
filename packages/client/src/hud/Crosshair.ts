@@ -20,30 +20,6 @@ export class Crosshair {
     const color = 'rgba(255, 255, 255, 0.45)';
     const thin = '1px';
 
-    // --- Horizontal crossbar (centered at top) ---
-    const hBar = this.makePart({
-      left: '-40px', top: '0', width: '80px', height: thin,
-      transform: 'translateY(-50%)',
-    }, color);
-
-    // Horizontal ticks (small vertical marks along the horizontal bar)
-    const hTickSpacing = 8;
-    const hTickCount = 5; // ticks per side
-    for (let i = 1; i <= hTickCount; i++) {
-      // Left side
-      this.makePart({
-        left: `${-i * hTickSpacing}px`, top: '0',
-        width: thin, height: '5px',
-        transform: 'translate(-50%, -50%)',
-      }, color);
-      // Right side
-      this.makePart({
-        left: `${i * hTickSpacing}px`, top: '0',
-        width: thin, height: '5px',
-        transform: 'translate(-50%, -50%)',
-      }, color);
-    }
-
     // --- Vertical post (extends downward from center) ---
     const vLength = 56;
     const vBar = this.makePart({
