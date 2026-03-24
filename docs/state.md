@@ -2,12 +2,13 @@
 _Last updated: 2026-03-23_
 
 ## Current focus
-AI bot players implemented. Showcase attract mode plays behind the menu screen. Spectate button lets users watch fullscreen. UI cleanup in progress for menu/spectate transitions.
+Bot AI overhauled with personality system. Showcase matches are more engaging to watch. Spawn layouts randomized for variety.
 
 ## What's working
 - Multiplayer: create/join rooms, share links, auto-rejoin, disconnect grace period (10s)
-- AI bots: server-side BotBrain with LOS targeting, inverse ballistics solver, aim spread, teleport repositioning
-- Showcase room: lazy bot match (6 bots) runs only when spectators connected, auto-restarts rounds/matches
+- AI bots: three personality types (Berserker, Marksman, Survivor) with gradual aim tracking, threat detection, strategic teleporting, intentional misses, victory celebrations
+- Showcase room: lazy bot match (6 bots, 2 of each personality) runs only when spectators connected, auto-restarts rounds/matches
+- Randomized spawns: uniform random placement with cluster mechanic, no longer uniformly spread out
 - Client attract mode: bot match renders behind frosted-glass menu, Spectate button for fullscreen orbital view
 - Showcase scoreboard: color dots with round wins, visible only during spectate
 - Teleport arrows now hit/kill players they pass through
@@ -40,8 +41,8 @@ Client is tested locally with `pnpm dev` (vite). Do not deploy client unless exp
 
 ## Next actions
 1. Verify menu/spectate UI cleanup on phone (thumbstick, bow, minimap hidden on menu)
-2. Consider bot difficulty settings or behavior variety
-3. Polish: bot name labels visible in spectate, kill feed
+2. Polish: bot name labels visible in spectate, kill feed
+3. Tune bot personality values based on playtesting (aim speeds, miss rates, teleport timing)
 
 ## How to verify
 1. `pnpm --filter @bojo-dojo/client exec tsc --noEmit`
@@ -50,6 +51,7 @@ Client is tested locally with `pnpm dev` (vite). Do not deploy client unless exp
 4. `pnpm dev` — open on phone, verify bot match behind menu, spectate mode works, no stray UI elements
 
 ## Recent logs
+- docs/log/2026-03-23 Smarter Bots and Random Spawns.md — Bot personality system, gradual aim tracking, threat detection, randomized spawns with cluster mechanic
 - docs/log/2026-03-23 AI Bot Players.md — Bot AI, showcase attract mode, spectate view, teleport kill fix, 6-player support
 - docs/log/2026-03-23 Playtest Polish and Bow Fix.md — Minimap, spectator mode, bow fix, deferred hit timing, UI/UX polish
 - docs/log/2026-03-17 Debug Terrain Loading.md — Diagnosed terrain failure as stale deployed server, fixed worldKey race condition
