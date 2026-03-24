@@ -2,6 +2,7 @@ import type { Vec3 } from '@bojo-dojo/common';
 import type { RoomState } from '../Room';
 import type { BotAction } from './BotBrain';
 import { BotBrain } from './BotBrain';
+import { ALL_PERSONALITIES } from './BotPersonality';
 import { pickBotNames } from './botNames';
 
 export type BotActionHandler = (botId: string, action: BotAction) => void;
@@ -20,7 +21,9 @@ export class BotManager {
     const id = `bot-${++this.botCounter}-${Date.now()}`;
     const displayName = name ?? `Bot ${this.botCounter}`;
     this.room.addBotPlayer(id, displayName, colorIndex);
-    this.brains.set(id, new BotBrain(id));
+    // Cycle through personalities so a 6-bot match gets 2 of each type
+    const personality = ALL_PERSONALITIES[(this.botCounter - 1) % ALL_PERSONALITIES.length];
+    this.brains.set(id, new BotBrain(id, personality));
     return id;
   }
 
@@ -35,7 +38,7 @@ export class BotManager {
 
   start() {
     this.stop();
-    this.tickInterval = setInterval(() => this.tick(), 500);
+    this.tickInterval = setInterval(() => this.tick(), 300);
   }
 
   stop() {
@@ -43,6 +46,12 @@ export class BotManager {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
+  }
+
+  /** Notify a bot brain that it scored a kill (triggers celebration) */
+  notifyKill(botId: string) {
+    const brain = this.brains.get(botId);
+    if (brain) brain.notifyKill();
   }
 
   removeAllBots() {

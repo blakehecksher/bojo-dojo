@@ -34,7 +34,7 @@ function hasOpenNearbyGround(heightmap: HeightmapData, x: number, z: number): bo
 function getMinimumSpawnDistance(heightmap: HeightmapData, playerCount: number): number {
   const extras = Math.max(0, playerCount - 2);
   return Math.min(
-    heightmap.worldWidth * 0.55,
+    heightmap.worldWidth * 0.3,
     SPAWN.MIN_DISTANCE_2P + extras * SPAWN.MIN_DISTANCE_PER_EXTRA_PLAYER,
   );
 }
@@ -128,12 +128,15 @@ export function generateSpawnPoints(
   }
 
   const selected: Vec3[] = [];
-  const centerBias = [...candidates].sort((a, b) => dist2D(a, { x: 0, z: 0 }) - dist2D(b, { x: 0, z: 0 }));
-  selected.push(centerBias[Math.floor(rng() * Math.min(16, centerBias.length))]);
 
+  // Expanded center bias pool — first spawn can be further from center for variety
+  const centerBias = [...candidates].sort((a, b) => dist2D(a, { x: 0, z: 0 }) - dist2D(b, { x: 0, z: 0 }));
+  const centerPoolSize = Math.max(16, Math.floor(centerBias.length * 0.25));
+  selected.push(centerBias[Math.floor(rng() * Math.min(centerPoolSize, centerBias.length))]);
+
+  // Weighted random selection — farther candidates mildly preferred but not guaranteed
   for (let playerIndex = 1; playerIndex < playerCount; playerIndex++) {
-    let bestIdx = -1;
-    let bestMinDist = -1;
+    const validCandidates: { index: number; minDist: number }[] = [];
 
     for (let i = 0; i < candidates.length; i++) {
       const candidate = candidates[i];
@@ -143,15 +146,15 @@ export function generateSpawnPoints(
         candidateMinDist = Math.min(candidateMinDist, dist2D(candidate, spawn));
       }
 
-      if (candidateMinDist < minDistance) continue;
-      if (candidateMinDist > bestMinDist) {
-        bestMinDist = candidateMinDist;
-        bestIdx = i;
+      if (candidateMinDist >= minDistance) {
+        validCandidates.push({ index: i, minDist: candidateMinDist });
       }
     }
 
-    if (bestIdx >= 0) {
-      selected.push(candidates[bestIdx]);
+    if (validCandidates.length > 0) {
+      // Uniform random from all valid candidates — no bias toward farther points
+      const pick = validCandidates[Math.floor(rng() * validCandidates.length)];
+      selected.push(candidates[pick.index]);
     }
   }
 
@@ -159,6 +162,26 @@ export function generateSpawnPoints(
     return fallbackSpawns(heightmap, playerCount);
   }
 
+  // Optional cluster: 50% chance to pull one spawn closer to another for early action
+  if (rng() < 0.5 && selected.length >= 3) {
+    const clusterBase = Math.floor(rng() * selected.length);
+    const clusterTarget = (clusterBase + 1) % selected.length;
+    const halfMin = minDistance * 0.5;
+
+    // Find a valid candidate 20-50m from the base spawn
+    const nearCandidates = candidates.filter((c) => {
+      const d = dist2D(c, selected[clusterBase]);
+      if (d < 20 || d > 50) return false;
+      // Must still be reasonably far from all other spawns
+      return selected.every((s, i) => i === clusterTarget || dist2D(c, s) >= halfMin);
+    });
+
+    if (nearCandidates.length > 0) {
+      selected[clusterTarget] = nearCandidates[Math.floor(rng() * nearCandidates.length)];
+    }
+  }
+
+  // LOS replacement pass — swap spawns that can see each other if possible
   for (let i = 0; i < selected.length; i++) {
     for (let j = i + 1; j < selected.length; j++) {
       if (!hasLineOfSight(heightmap, selected[i], selected[j])) continue;

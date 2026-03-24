@@ -196,6 +196,10 @@ export class ShowcaseManager {
         if (this.room.phase !== 'playing' || this.room.currentRound !== firedInRound) return;
 
         const result = this.room.absorbOrKillPlayer(playerHit.targetId);
+        // Notify the shooting bot of its kill so it can celebrate
+        if (!result.blockedByShield) {
+          this.botManager.notifyKill(playerId);
+        }
         this.broadcastFn({
           type: 'PLAYER_HIT',
           targetId: playerHit.targetId,
