@@ -20,6 +20,12 @@ export class Crosshair {
     const color = 'rgba(255, 255, 255, 0.45)';
     const thin = '1px';
 
+    // --- Center horizontal tick (short crossmark at the aiming point) ---
+    this.makePart({
+      left: '0', top: '0', width: '7px', height: thin,
+      transform: 'translate(-50%, -50%)',
+    }, color);
+
     // --- Vertical post (extends downward from center) ---
     const vLength = 56;
     const vBar = this.makePart({
