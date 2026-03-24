@@ -39,6 +39,16 @@ function getMinimumSpawnDistance(heightmap: HeightmapData, playerCount: number):
   );
 }
 
+export function getSpawnPoolSize(playerCount: number): number {
+  return Math.max(
+    playerCount,
+    Math.max(
+      SPAWN.MIN_POOL_SIZE,
+      Math.min(SPAWN.MAX_POOL_SIZE, playerCount + SPAWN.EXTRA_POOL_SLOTS),
+    ),
+  );
+}
+
 export function hasLineOfSight(heightmap: HeightmapData, a: Vec3, b: Vec3): boolean {
   const eyeHeight = SPAWN.PLAYER_EYE_HEIGHT;
   const steps = 50;
@@ -90,19 +100,20 @@ function fallbackSpawns(heightmap: HeightmapData, count: number): Vec3[] {
 }
 
 /**
- * Generate spawn points for N players on the given heightmap.
- * Uses farthest-point sampling with slope, edge, openness, and LOS checks.
+ * Generate a spawn pool for the given match.
+ * activePlayerCount controls spacing; spawnCount controls the pool size.
  */
 export function generateSpawnPoints(
   seed: number,
   heightmap: HeightmapData,
-  playerCount: number,
+  activePlayerCount: number,
+  spawnCount = activePlayerCount,
 ): Vec3[] {
   const rng = mulberry32(seed + 12345);
   const { worldWidth, worldDepth, width, depth } = heightmap;
   const halfW = worldWidth / 2;
   const halfD = worldDepth / 2;
-  const minDistance = getMinimumSpawnDistance(heightmap, playerCount);
+  const minDistance = getMinimumSpawnDistance(heightmap, activePlayerCount);
 
   const candidates: Vec3[] = [];
   const step = 8;
@@ -123,8 +134,8 @@ export function generateSpawnPoints(
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
 
-  if (candidates.length < playerCount) {
-    return fallbackSpawns(heightmap, playerCount);
+  if (candidates.length < spawnCount) {
+    return fallbackSpawns(heightmap, spawnCount);
   }
 
   const selected: Vec3[] = [];
@@ -135,7 +146,7 @@ export function generateSpawnPoints(
   selected.push(centerBias[Math.floor(rng() * Math.min(centerPoolSize, centerBias.length))]);
 
   // Weighted random selection — farther candidates mildly preferred but not guaranteed
-  for (let playerIndex = 1; playerIndex < playerCount; playerIndex++) {
+  for (let spawnIndex = 1; spawnIndex < spawnCount; spawnIndex++) {
     const validCandidates: { index: number; minDist: number }[] = [];
 
     for (let i = 0; i < candidates.length; i++) {
@@ -158,8 +169,8 @@ export function generateSpawnPoints(
     }
   }
 
-  if (selected.length < playerCount) {
-    return fallbackSpawns(heightmap, playerCount);
+  if (selected.length < spawnCount) {
+    return fallbackSpawns(heightmap, spawnCount);
   }
 
   // Optional cluster: 50% chance to pull one spawn closer to another for early action

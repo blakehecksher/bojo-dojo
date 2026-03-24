@@ -97,6 +97,15 @@ test.describe('Offline gameplay', () => {
     // DEBUG_CLOSE_SPAWN places at ~5m; production uses MIN_DISTANCE_2P = 80m
     expect(distance).toBeGreaterThan(3);
   });
+
+  test('two-player world generates a spawn pool larger than the active player count', async ({ page }) => {
+    const spawnCount = await page.evaluate(() => {
+      const g = (window as any).__game;
+      return g.world?.spawns?.length ?? 0;
+    });
+
+    expect(spawnCount).toBeGreaterThan(2);
+  });
 });
 
 test.describe('Menu screen', () => {

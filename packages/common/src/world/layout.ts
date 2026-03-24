@@ -9,7 +9,7 @@ import type {
 } from '../types.js';
 import { generateHeightmap, getSlopeAt, sampleHeight } from '../terrain/heightmap.js';
 import { mulberry32 } from '../terrain/noise.js';
-import { generateSpawnPoints } from '../terrain/spawn.js';
+import { generateSpawnPoints, getSpawnPoolSize } from '../terrain/spawn.js';
 import { generateObstacleLayout } from './obstacles.js';
 
 function distance2D(a: { x: number; z: number }, b: { x: number; z: number }): number {
@@ -118,9 +118,10 @@ function generatePickupLayout(
   terrain: TerrainParams,
   spawns: WorldLayout['spawns'],
   exclusions: CircleArea[],
+  playerCount: number,
 ): PickupState[] {
   const candidates = buildPickupCandidates(heightmap, terrain, spawns, exclusions);
-  const counts = getPickupCounts(spawns.length);
+  const counts = getPickupCounts(playerCount);
   const pickups: PickupState[] = [];
 
   takePickupCandidate(candidates, pickups, 'shield', true, 'shield', counts.shields);
@@ -158,20 +159,21 @@ export function generateWorldLayout(seed: number, playerCount: number): {
   layout: WorldLayout;
 } {
   const terrain = getTerrainParamsForPlayerCount(playerCount);
+  const spawnCount = getSpawnPoolSize(playerCount);
 
   for (let attempt = 0; attempt < SPAWN.MAX_GENERATION_RETRIES; attempt++) {
     const attemptSeed = seed + attempt * 7919;
     const heightmap = generateHeightmap(attemptSeed, terrain);
-    const spawns = generateSpawnPoints(attemptSeed, heightmap, playerCount);
+    const spawns = generateSpawnPoints(attemptSeed, heightmap, playerCount, spawnCount);
     const exclusions = spawns.map((spawn) => ({
       x: spawn.x,
       z: spawn.z,
       radius: SPAWN.CLEAR_RADIUS,
     }));
     const obstacles = generateObstacleLayout(attemptSeed, heightmap, terrain, exclusions);
-    const pickups = generatePickupLayout(heightmap, terrain, spawns, exclusions);
+    const pickups = generatePickupLayout(heightmap, terrain, spawns, exclusions, playerCount);
 
-    if (spawns.length === playerCount && pickups.length > 0) {
+    if (spawns.length === spawnCount && pickups.length > 0) {
       return {
         heightmap,
         layout: {
@@ -188,7 +190,7 @@ export function generateWorldLayout(seed: number, playerCount: number): {
   }
 
   const heightmap = generateHeightmap(seed, terrain);
-  const spawns = generateSpawnPoints(seed, heightmap, playerCount);
+  const spawns = generateSpawnPoints(seed, heightmap, playerCount, spawnCount);
   const exclusions = spawns.map((spawn) => ({
     x: spawn.x,
     z: spawn.z,
@@ -203,7 +205,7 @@ export function generateWorldLayout(seed: number, playerCount: number): {
       spawnClearRadius: SPAWN.CLEAR_RADIUS,
       spawns,
       obstacles: generateObstacleLayout(seed, heightmap, terrain, exclusions),
-      pickups: generatePickupLayout(heightmap, terrain, spawns, exclusions),
+      pickups: generatePickupLayout(heightmap, terrain, spawns, exclusions, playerCount),
       zone: createZoneConfig(heightmap),
     },
   };

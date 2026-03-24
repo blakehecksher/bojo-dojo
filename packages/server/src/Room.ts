@@ -60,6 +60,8 @@ export class RoomState {
   currentRound = 0;
   roundTimeRemaining = 0;
   spawnAssignments: Record<string, Vec3> = {};
+  spawnRotation: Vec3[] = [];
+  spawnRotationOffset = 0;
 
   addOrReconnectPlayer(id: string, connId: string, displayName: string, colorIndex = 0) {
     const existing = this.players.get(id);
@@ -161,23 +163,15 @@ export class RoomState {
       this.heightmap = generated.heightmap;
     }
 
-    const playerIds = [...this.players.keys()];
     this.spawnAssignments = {};
-    for (let i = 0; i < playerIds.length; i++) {
-      const playerId = playerIds[i];
-      const spawn = this.world!.spawns[i % this.world!.spawns.length];
-      this.spawnAssignments[playerId] = { ...spawn };
-      const player = this.players.get(playerId)!;
-      player.spawnIndex = i;
-      player.position = { ...spawn };
-    }
+    this.resetSpawnRotation();
 
     this.pickups = clonePickups(this.world!.pickups);
     this.zone = getDefaultZoneState(this.world!);
     this.landedArrows = [];
     this.currentRound = 0;
 
-    for (const playerId of playerIds) {
+    for (const playerId of this.players.keys()) {
       this.scores[playerId] = 0;
     }
   }
@@ -193,19 +187,7 @@ export class RoomState {
     this.zone = this.world ? getDefaultZoneState(this.world) : null;
     this.landedArrows = [];
 
-    // Shuffle spawn assignments each round so positions vary
-    if (this.world) {
-      const playerIds = [...this.players.keys()];
-      const spawns = [...this.world.spawns];
-      // Fisher-Yates shuffle
-      for (let i = spawns.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [spawns[i], spawns[j]] = [spawns[j], spawns[i]];
-      }
-      for (let i = 0; i < playerIds.length; i++) {
-        this.spawnAssignments[playerIds[i]] = { ...spawns[i % spawns.length] };
-      }
-    }
+    this.assignRotatingSpawns();
 
     for (const player of this.players.values()) {
       player.alive = true;
@@ -219,6 +201,39 @@ export class RoomState {
       player.disconnectDeadline = null;
       player.position = { ...this.spawnAssignments[player.id] };
     }
+  }
+
+  private resetSpawnRotation() {
+    if (!this.world) {
+      this.spawnRotation = [];
+      this.spawnRotationOffset = 0;
+      return;
+    }
+
+    this.spawnRotation = this.world.spawns.map((spawn) => ({ ...spawn }));
+    for (let i = this.spawnRotation.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.spawnRotation[i], this.spawnRotation[j]] = [this.spawnRotation[j], this.spawnRotation[i]];
+    }
+    this.spawnRotationOffset = 0;
+  }
+
+  private assignRotatingSpawns() {
+    const playerIds = [...this.players.keys()];
+    const pool = this.spawnRotation.length > 0 ? this.spawnRotation : this.world?.spawns ?? [];
+    if (pool.length === 0) return;
+
+    for (let i = 0; i < playerIds.length; i++) {
+      const playerId = playerIds[i];
+      const rotationIndex = (this.spawnRotationOffset + i) % pool.length;
+      const spawn = pool[rotationIndex];
+      this.spawnAssignments[playerId] = { ...spawn };
+      const player = this.players.get(playerId);
+      if (!player) continue;
+      player.spawnIndex = rotationIndex;
+    }
+
+    this.spawnRotationOffset = (this.spawnRotationOffset + 1) % pool.length;
   }
 
   startRematch(reuseWorld: boolean) {
