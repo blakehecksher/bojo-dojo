@@ -5,7 +5,7 @@ export class ArrowTrailPrototype {
   readonly line: THREE.Line;
   private positions: Float32Array;
 
-  constructor(segmentCount = 8, color = prototypePalette.ember) {
+  constructor(segmentCount = 8, color: number = prototypePalette.ember) {
     this.positions = new Float32Array(segmentCount * 3);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
@@ -44,7 +44,7 @@ export class RingPulsePrototype {
   private elapsed = 0;
   private active = false;
 
-  constructor(color = prototypePalette.teleport, ringCount = 3, duration = 0.55) {
+  constructor(color: number = prototypePalette.teleport, ringCount = 3, duration = 0.55) {
     this.duration = duration;
 
     for (let index = 0; index < ringCount; index++) {
@@ -122,7 +122,7 @@ export class ShardBurstPrototype {
   private elapsed = 0;
   private active = false;
 
-  constructor(color = prototypePalette.shieldGlow, shardCount = 10, duration = 0.6) {
+  constructor(color: number = prototypePalette.shieldGlow, shardCount = 10, duration = 0.6) {
     this.duration = duration;
 
     for (let index = 0; index < shardCount; index++) {

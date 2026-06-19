@@ -7,7 +7,17 @@
 
 const MAX_AUDIBLE_DISTANCE = 200; // meters
 
-export type SoundId = 'bow-draw' | 'bow-release' | 'arrow-land' | 'arrow-whiz' | 'arrow-flight' | 'ui-click';
+export type SoundId =
+  | 'bow-draw'
+  | 'bow-release'
+  | 'arrow-land'
+  | 'arrow-whiz'
+  | 'arrow-flight'
+  | 'ui-click'
+  | 'ambient'
+  | 'kill'
+  | 'hurt'
+  | 'hitmarker';
 
 interface SoundDef {
   buffer: AudioBuffer | null;
@@ -19,6 +29,7 @@ export class AudioManager {
   private sounds = new Map<SoundId, SoundDef>();
   private activeSources = new Map<string, AudioBufferSourceNode>();
   private unlocked = false;
+  private ambientKey: string | null = null;
 
   constructor() {
     // Defer AudioContext creation to first user gesture
@@ -47,6 +58,10 @@ export class AudioManager {
     this.generateArrowWhiz();
     this.generateArrowFlight();
     this.generateUIClick();
+    this.generateAmbient();
+    this.generateKill();
+    this.generateHurt();
+    this.generateHitmarker();
   }
 
   // --- Richer placeholder tone generators ---
@@ -176,6 +191,106 @@ export class AudioManager {
       d[i] = Math.sin(2 * Math.PI * 800 * t) * 0.15 * env;
     }
     this.sounds.set('ui-click', { buffer: buf, loop: false });
+  }
+
+  /** Ambient bed: soft filtered wind hum, seamless loop for gameplay atmosphere */
+  private generateAmbient() {
+    if (!this.ctx) return;
+    const sr = this.ctx.sampleRate;
+    const dur = 3.0;
+    const len = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+
+    // Low-passed noise + slow LFO swell, with crossfaded ends for a seamless loop.
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      const noise = (Math.random() - 0.5);
+      last = last * 0.96 + noise * 0.04; // simple one-pole low-pass
+      const swell = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.12 * t);
+      const drone = Math.sin(2 * Math.PI * 60 * t) * 0.015;
+      d[i] = (last * 0.9 + drone) * (0.35 + swell * 0.35);
+    }
+    // Crossfade last 0.3s into the start to avoid a seam click.
+    const xf = Math.floor(sr * 0.3);
+    for (let i = 0; i < xf; i++) {
+      const a = i / xf;
+      d[i] = d[i] * a + d[len - xf + i] * (1 - a);
+    }
+    this.sounds.set('ambient', { buffer: buf, loop: true });
+  }
+
+  /** Kill sting: bright rising triad, confident and short */
+  private generateKill() {
+    if (!this.ctx) return;
+    const sr = this.ctx.sampleRate;
+    const dur = 0.5;
+    const len = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+    // Major triad arpeggio: A4 -> C#5 -> E5
+    const notes = [440, 554, 659];
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      const step = Math.min(notes.length - 1, Math.floor(t / 0.1));
+      const freq = notes[step];
+      const noteT = t - step * 0.1;
+      const env = Math.exp(-noteT * 6) * Math.min(1, t * 40);
+      d[i] = (Math.sin(2 * Math.PI * freq * t) * 0.18
+        + Math.sin(2 * Math.PI * freq * 2 * t) * 0.06) * env;
+    }
+    this.sounds.set('kill', { buffer: buf, loop: false });
+  }
+
+  /** Hurt: harsh low impact + noise crunch when the local player is hit */
+  private generateHurt() {
+    if (!this.ctx) return;
+    const sr = this.ctx.sampleRate;
+    const dur = 0.4;
+    const len = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      const env = Math.exp(-t * 9);
+      const v = Math.sin(2 * Math.PI * 70 * t) * 0.3
+        + Math.sin(2 * Math.PI * 110 * t) * 0.12
+        + (Math.random() - 0.5) * 0.35 * Math.exp(-t * 22);
+      d[i] = v * env;
+    }
+    this.sounds.set('hurt', { buffer: buf, loop: false });
+  }
+
+  /** Hitmarker: crisp double-tick confirming a landed shot */
+  private generateHitmarker() {
+    if (!this.ctx) return;
+    const sr = this.ctx.sampleRate;
+    const dur = 0.09;
+    const len = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      const env = Math.exp(-t * 70);
+      d[i] = (Math.sin(2 * Math.PI * 1400 * t) * 0.16
+        + Math.sin(2 * Math.PI * 2100 * t) * 0.08) * env;
+    }
+    this.sounds.set('hitmarker', { buffer: buf, loop: false });
+  }
+
+  /** Start the looping ambient bed (no-op if already playing). */
+  startAmbient() {
+    if (this.ambientKey || !this.unlocked) return;
+    this.ambientKey = this.play('ambient');
+  }
+
+  /** Stop the ambient bed. */
+  stopAmbient() {
+    if (this.ambientKey) {
+      this.stop(this.ambientKey);
+      this.ambientKey = null;
+    }
   }
 
   /**

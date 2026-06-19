@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 export class SceneManager {
   readonly renderer: THREE.WebGLRenderer;
@@ -7,6 +11,8 @@ export class SceneManager {
 
   private clock = new THREE.Clock();
   private frameCallbacks: Array<(dt: number) => void> = [];
+  private composer: EffectComposer;
+  private bloomPass: UnrealBloomPass;
 
   constructor() {
     // Renderer — 60 fps with antialiasing for smooth visuals
@@ -59,6 +65,21 @@ export class SceneManager {
     // Fog for draw distance limiting (good for mobile perf)
     this.scene.fog = new THREE.Fog(0x87ceeb, 150, 350);
 
+    // --- Post-processing: bloom makes glows (arrows, teleport, shields, effects) pop ---
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.55, // strength — bright enough to glow, restrained enough to not wash out
+      0.45, // radius
+      0.82, // threshold — only genuinely bright pixels bloom
+    );
+    this.composer.addPass(this.bloomPass);
+    // OutputPass applies tone mapping + sRGB conversion at the end of the chain.
+    this.composer.addPass(new OutputPass());
+
     // Handle resize
     window.addEventListener('resize', this.onResize);
   }
@@ -69,6 +90,8 @@ export class SceneManager {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.composer.setSize(w, h);
+    this.bloomPass.setSize(w, h);
   };
 
   /** Register a callback to run each frame. */
@@ -82,7 +105,7 @@ export class SceneManager {
     this.renderer.setAnimationLoop(() => {
       const dt = Math.min(this.clock.getDelta(), 0.05); // cap at 50ms to avoid spiral
       for (const cb of this.frameCallbacks) cb(dt);
-      this.renderer.render(this.scene, this.camera);
+      this.composer.render();
     });
   }
 
@@ -98,7 +121,7 @@ export class SceneManager {
     this.renderer.setAnimationLoop(() => {
       const dt = Math.min(this.clock.getDelta(), 0.05);
       for (const cb of this.frameCallbacks) cb(dt);
-      this.renderer.render(this.scene, this.camera);
+      this.composer.render();
     });
   }
 

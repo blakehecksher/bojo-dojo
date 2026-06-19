@@ -8,6 +8,7 @@ import { PlayerCount } from './PlayerCount';
 import { Minimap } from './Minimap';
 import { ShieldGlow } from './ShieldGlow';
 import { ShowcaseScoreboard } from './ShowcaseScoreboard';
+import { CombatFeedback } from './CombatFeedback';
 
 /**
  * HUD — HTML overlay container managing all UI elements.
@@ -27,6 +28,7 @@ export class HUD {
   readonly minimap: Minimap;
   readonly shieldGlow: ShieldGlow;
   readonly showcaseScoreboard: ShowcaseScoreboard;
+  readonly combatFeedback: CombatFeedback;
 
   constructor() {
     this.element = document.getElementById('hud') as HTMLDivElement;
@@ -59,6 +61,7 @@ export class HUD {
     this.minimap = new Minimap(this.element);
     this.shieldGlow = new ShieldGlow(this.element);
     this.showcaseScoreboard = new ShowcaseScoreboard(this.element);
+    this.combatFeedback = new CombatFeedback(this.element);
   }
 
   dispose() {
@@ -75,5 +78,6 @@ export class HUD {
     this.minimap.dispose();
     this.shieldGlow.dispose();
     this.showcaseScoreboard.dispose();
+    this.combatFeedback.dispose();
   }
 }

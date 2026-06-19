@@ -291,6 +291,7 @@ export default class BojoDojo implements Party.Server {
         this.broadcastJson({
           type: 'PLAYER_HIT',
           targetId: playerHit.targetId,
+          attackerId: playerId,
           arrowId,
           blockedByShield: result.blockedByShield,
         });

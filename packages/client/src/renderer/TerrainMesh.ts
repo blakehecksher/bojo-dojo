@@ -47,17 +47,14 @@ export function createTerrainMesh(heightmap: HeightmapData): THREE.Mesh {
     // Set Y to height value
     positions.setY(i, h);
 
-    // Color based on normalized height
+    // Color based on normalized height — clean elevation bands (no per-vertex
+    // jitter; flat shading provides the faceted, stylized low-poly look instead).
     const t = (h - minH) / hRange;
     if (t < 0.4) {
       tmpColor.copy(COLOR_LOW).lerp(COLOR_MID, t / 0.4);
     } else {
       tmpColor.copy(COLOR_MID).lerp(COLOR_HIGH, (t - 0.4) / 0.6);
     }
-    // Add slight random variation per vertex for visual interest
-    tmpColor.r += (Math.random() - 0.5) * 0.03;
-    tmpColor.g += (Math.random() - 0.5) * 0.03;
-    tmpColor.b += (Math.random() - 0.5) * 0.02;
 
     colors[i * 3] = tmpColor.r;
     colors[i * 3 + 1] = tmpColor.g;
@@ -70,6 +67,7 @@ export function createTerrainMesh(heightmap: HeightmapData): THREE.Mesh {
   const material = new THREE.MeshLambertMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
+    flatShading: true, // faceted TABS-style low-poly look (per art-direction spec)
   });
 
   const mesh = new THREE.Mesh(geometry, material);

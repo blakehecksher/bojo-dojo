@@ -203,6 +203,7 @@ export class ShowcaseManager {
         this.broadcastFn({
           type: 'PLAYER_HIT',
           targetId: playerHit.targetId,
+          attackerId: playerId,
           arrowId,
           blockedByShield: result.blockedByShield,
         });

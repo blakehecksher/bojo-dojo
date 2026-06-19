@@ -25,8 +25,10 @@ export class PlayerMarker {
   private originalColor: number;
   private flashTimer = 0;
   private shieldMesh: THREE.Mesh;
+  private label: THREE.Sprite | null = null;
+  private labelTexture: THREE.CanvasTexture | null = null;
 
-  constructor(scene: THREE.Scene, playerId: string, colorIndex: number) {
+  constructor(scene: THREE.Scene, playerId: string, colorIndex: number, displayName?: string) {
     this.playerId = playerId;
     this.mesh = new THREE.Group();
 
@@ -73,6 +75,45 @@ export class PlayerMarker {
     this.shieldMesh.position.y = PHYSICS.PLAYER_HITBOX_HEIGHT * 0.55;
     this.shieldMesh.visible = false;
     this.mesh.add(this.shieldMesh);
+
+    if (displayName) this.setName(displayName);
+  }
+
+  /** Floating name label above the head, always facing the camera. */
+  setName(name: string) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 40px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Outline for readability against any terrain
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(name, 128, 34);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(name, 128, 34);
+
+    if (!this.label) {
+      this.labelTexture = new THREE.CanvasTexture(canvas);
+      this.labelTexture.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.SpriteMaterial({
+        map: this.labelTexture,
+        transparent: true,
+        // depthTest ON so terrain/hills occlude the label — a name poking through
+        // a hill would give away a hidden player's position.
+        depthTest: true,
+        depthWrite: false,
+      });
+      this.label = new THREE.Sprite(mat);
+      this.label.scale.set(2.2, 0.55, 1);
+      this.label.position.y = PHYSICS.PLAYER_HITBOX_HEIGHT * 1.15;
+      this.mesh.add(this.label);
+    } else {
+      this.labelTexture!.image = canvas;
+      this.labelTexture!.needsUpdate = true;
+    }
   }
 
   /** Set position (base/feet position on terrain). */
@@ -117,5 +158,7 @@ export class PlayerMarker {
   /** Remove from scene. */
   dispose() {
     this.mesh.parent?.remove(this.mesh);
+    this.labelTexture?.dispose();
+    if (this.label) (this.label.material as THREE.SpriteMaterial).dispose();
   }
 }

@@ -147,7 +147,7 @@ export type ServerMessage =
   | { type: 'TIMER_SYNC'; remainingSeconds: number }
   | { type: 'ARROW_FIRED'; origin: Vec3; direction: Vec3; force: number; arrowType: ArrowType }
   | { type: 'ARROW_LANDED'; arrowId: string; position: Vec3; isTeleport: boolean }
-  | { type: 'PLAYER_HIT'; targetId: string; arrowId: string; blockedByShield: boolean }
+  | { type: 'PLAYER_HIT'; targetId: string; attackerId: string; arrowId: string; blockedByShield: boolean }
   | { type: 'ROUND_END'; winnerId: string | null; scores: Record<string, number> }
   | { type: 'MATCH_OVER'; winnerId: string; scores: Record<string, number> }
   | { type: 'FLETCH_START'; playerId: string; durationSeconds: number }

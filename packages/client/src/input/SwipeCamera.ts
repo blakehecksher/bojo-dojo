@@ -16,7 +16,36 @@ export class SwipeCamera implements InputHandler {
   private enabled = true;
   private forcedPitchOffset = 0;
 
+  // --- Screen shake (impact / recoil juice) ---
+  private trauma = 0;          // 0..1, decays over time
+  private shakePitch = 0;
+  private shakeYaw = 0;
+  private shakeRoll = 0;
+
   constructor(private camera: THREE.Camera) {}
+
+  /** Add screen-shake energy. amount ~0.2 = light recoil, ~0.7 = heavy hit. */
+  addTrauma(amount: number) {
+    this.trauma = Math.min(1, this.trauma + amount);
+  }
+
+  /** Advance shake decay and recompute shake offsets. Call every frame. */
+  updateShake(dt: number) {
+    if (this.trauma <= 0) {
+      if (this.shakePitch !== 0 || this.shakeYaw !== 0 || this.shakeRoll !== 0) {
+        this.shakePitch = this.shakeYaw = this.shakeRoll = 0;
+        this.applyToCamera();
+      }
+      return;
+    }
+    this.trauma = Math.max(0, this.trauma - dt * 1.8);
+    // Shake magnitude scales with trauma^2 for a punchy, fast-settling feel.
+    const mag = this.trauma * this.trauma;
+    this.shakePitch = (Math.random() * 2 - 1) * mag * 0.06;
+    this.shakeYaw = (Math.random() * 2 - 1) * mag * 0.05;
+    this.shakeRoll = (Math.random() * 2 - 1) * mag * 0.10;
+    this.applyToCamera();
+  }
 
   hitTest(_x: number, _y: number): boolean {
     return true;
@@ -77,7 +106,12 @@ export class SwipeCamera implements InputHandler {
   }
 
   private applyToCamera() {
-    this.euler.set(this.pitch + this.forcedPitchOffset, this.yaw, 0, 'YXZ');
+    this.euler.set(
+      this.pitch + this.forcedPitchOffset + this.shakePitch,
+      this.yaw + this.shakeYaw,
+      this.shakeRoll,
+      'YXZ',
+    );
     this.camera.quaternion.setFromEuler(this.euler);
   }
 }

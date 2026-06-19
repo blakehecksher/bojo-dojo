@@ -33,6 +33,7 @@ import { placeObstacles } from '../renderer/ObstaclePlacer';
 import { PickupMarkers } from '../renderer/PickupMarkers';
 import { PlayerMarker } from '../renderer/PlayerMarker';
 import { SceneManager } from '../renderer/SceneManager';
+import { HitEffects } from '../renderer/HitEffects';
 import { createSky } from '../renderer/SkyBox';
 import { createTerrainMesh } from '../renderer/TerrainMesh';
 import { TrajectoryLine } from '../renderer/TrajectoryLine';
@@ -75,6 +76,7 @@ export class Game {
   private trajectoryLine!: TrajectoryLine;
   private zoneRing!: ZoneRing;
   private pickupMarkers!: PickupMarkers;
+  private hitEffects!: HitEffects;
   private activeArrows: ArrowModel[] = [];
   private landedArrowMeshes = new Map<string, ArrowModel>();
   private playerMarkers = new Map<string, PlayerMarker>();
@@ -113,6 +115,7 @@ export class Game {
 
   constructor() {
     this.sceneManager = new SceneManager();
+    this.hitEffects = new HitEffects(this.sceneManager.scene);
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.connection = new GameConnection();
@@ -122,9 +125,16 @@ export class Game {
     this.roundEndScreen = new RoundEndScreen(this.hud.element);
     this.loadingScreen = new LoadingScreen(this.hud.element);
 
-    const unlockAudio = () => {
-      this.audio.unlock();
-      document.documentElement.requestFullscreen?.({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
+    // Only auto-fullscreen on touch devices (mobile) — desktop users don't want
+    // the page hijacked into fullscreen on first click.
+    const isTouchDevice = window.matchMedia?.('(pointer: coarse)').matches
+      || 'ontouchstart' in window;
+    const unlockAudio = async () => {
+      await this.audio.unlock();
+      this.audio.startAmbient();
+      if (isTouchDevice) {
+        document.documentElement.requestFullscreen?.({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
+      }
     };
     // Unlock on first tap, and re-unlock on subsequent taps if browser re-suspended
     document.addEventListener('pointerdown', unlockAudio, { once: false });
@@ -368,7 +378,7 @@ export class Game {
           this.ensureLandedArrow(msg.arrowId, msg.position);
           break;
         case 'PLAYER_HIT':
-          this.handlePlayerHit(msg.targetId, msg.blockedByShield);
+          this.handlePlayerHit(msg.targetId, msg.attackerId, msg.blockedByShield);
           break;
         case 'ROUND_END':
           this.handleRoundEnd(msg.winnerId, msg.scores);
@@ -488,7 +498,11 @@ export class Game {
             -this.thumbstick.dy * speed * dt,
           );
         }
+        // Screen shake (recoil / impact) layered on top of aim — gameplay only.
+        this.swipeCamera.updateShake(dt);
       }
+
+      this.hitEffects.update(dt);
 
       if (this.isDrawing && this.pullSlider.force > INPUT.PULL_SLIDER_CANCEL_ZONE && this.heightmap) {
         this.trajectoryLine.update(getPreviewPoints(this.computePreviewTrajectory(this.pullSlider.force)));
@@ -703,7 +717,7 @@ export class Game {
       activeIds.add(player.id);
       let marker = this.playerMarkers.get(player.id);
       if (!marker) {
-        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex);
+        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex, player.displayName);
         this.playerMarkers.set(player.id, marker);
       }
       marker.setPosition(player.position.x, player.position.y, player.position.z);
@@ -897,6 +911,8 @@ export class Game {
     if (arrowType === 'teleport') this.selectedArrowType = 'normal';
     this.resetDrawState();
     this.bowModel.fireRecoil();
+    this.swipeCamera.addTrauma(0.18);
+    navigator.vibrate?.(15);
   }
 
   private fireOfflineArrow(force: number) {
@@ -942,7 +958,16 @@ export class Game {
           if (!this.offlineEnemyAlive) return;
           this.offlineEnemyAlive = false;
           const marker = this.playerMarkers.get('enemy');
-          if (marker) marker.mesh.visible = false;
+          if (marker) {
+            this.hitEffects.playDeath(marker.mesh.position);
+            marker.flashHit();
+            setTimeout(() => { marker.mesh.visible = false; }, 300);
+          }
+          this.hud.combatFeedback.showHitmarker();
+          this.hud.combatFeedback.showKill('ELIMINATED');
+          this.audio.play('hitmarker');
+          this.audio.play('kill');
+          navigator.vibrate?.(45);
           this.roundActive = false;
           this.round.end('hit');
           this.roundEndScreen.show('Hit!', 'Tap to play again', () => this.startOfflineRound());
@@ -953,6 +978,8 @@ export class Game {
     if (arrowType === 'teleport') this.selectedArrowType = 'normal';
     this.resetDrawState();
     this.bowModel.fireRecoil();
+    this.swipeCamera.addTrauma(0.18);
+    navigator.vibrate?.(15);
     this.syncHudState();
   }
 
@@ -987,18 +1014,58 @@ export class Game {
     this.trajectoryLine.hide();
   }
 
-  private handlePlayerHit(targetId: string, blockedByShield: boolean) {
+  private handlePlayerHit(targetId: string, attackerId: string, blockedByShield: boolean) {
     const marker = this.playerMarkers.get(targetId);
+
+    // Resolve a world position for the impact effects.
+    const effectPos = new THREE.Vector3();
+    if (marker) {
+      effectPos.copy(marker.mesh.position);
+    } else if (targetId === this.localPlayerId) {
+      const cam = this.sceneManager.camera.position;
+      effectPos.set(cam.x, cam.y - SPAWN.PLAYER_EYE_HEIGHT, cam.z);
+    }
+
+    // 3D impact effects (these were built in asset-lab but never wired in until now).
+    if (blockedByShield) {
+      this.hitEffects.playShieldBreak(effectPos);
+    } else {
+      this.hitEffects.playDeath(effectPos);
+    }
+
     if (marker) {
       marker.flashHit();
       if (!blockedByShield) setTimeout(() => { marker.mesh.visible = false; }, 300);
     }
-    if (targetId === this.localPlayerId) {
+
+    const localIsVictim = targetId === this.localPlayerId;
+    const localIsAttacker = attackerId === this.localPlayerId && !localIsVictim;
+
+    // --- Victim feedback (the local player got hit) ---
+    if (localIsVictim) {
       if (blockedByShield) {
+        this.swipeCamera.addTrauma(0.3);
+        navigator.vibrate?.(30);
         this.hud.statusBanner.show('Shield absorbed the hit');
         setTimeout(() => this.hud.statusBanner.hide(), 1200);
       } else {
+        this.hud.combatFeedback.flashDamage();
+        this.swipeCamera.addTrauma(0.75);
+        this.audio.play('hurt');
+        navigator.vibrate?.([0, 60, 40, 90]);
         this.hud.statusBanner.show('You were hit');
+      }
+    }
+
+    // --- Attacker feedback (the local player landed the shot) ---
+    if (localIsAttacker) {
+      this.hud.combatFeedback.showHitmarker();
+      this.audio.play('hitmarker');
+      if (!blockedByShield) {
+        const name = this.lobbyPlayers.find((p) => p.id === targetId)?.displayName || 'Enemy';
+        this.hud.combatFeedback.showKill(`ELIMINATED ${name.toUpperCase()}`);
+        this.audio.play('kill');
+        navigator.vibrate?.(45);
       }
     }
   }
@@ -1038,7 +1105,7 @@ export class Game {
     await this.initGameWorld(generated.layout);
     this.localPlayerId = 'local';
     this.spawns = { local: cloneVec3(generated.layout.spawns[0]), enemy: cloneVec3(generated.layout.spawns[1]) };
-    const marker = new PlayerMarker(this.sceneManager.scene, 'enemy', 0);
+    const marker = new PlayerMarker(this.sceneManager.scene, 'enemy', 0, 'Rival');
     marker.setPosition(this.spawns.enemy.x, this.spawns.enemy.y, this.spawns.enemy.z);
     this.playerMarkers.set('enemy', marker);
     this.snapLocalCamera(this.spawns.local, true);
@@ -1160,6 +1227,8 @@ export class Game {
         case 'PLAYER_HIT': {
           const marker = this.playerMarkers.get(msg.targetId);
           if (marker) {
+            if (msg.blockedByShield) this.hitEffects.playShieldBreak(marker.mesh.position);
+            else this.hitEffects.playDeath(marker.mesh.position);
             marker.flashHit();
             if (!msg.blockedByShield) setTimeout(() => { marker.mesh.visible = false; }, 300);
           }
@@ -1216,7 +1285,7 @@ export class Game {
       activeIds.add(player.id);
       let marker = this.playerMarkers.get(player.id);
       if (!marker) {
-        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex);
+        marker = new PlayerMarker(this.sceneManager.scene, player.id, player.colorIndex, player.displayName);
         this.playerMarkers.set(player.id, marker);
       }
       marker.setPosition(player.position.x, player.position.y, player.position.z);
